@@ -3,6 +3,16 @@ locals {
   # to; an environment absent from the file has no service.
   deployments = yamldecode(file("${path.module}/deployments/${var.component}.yaml"))
 
+  # Feature flags and their defaults are declared once, in the inventory. An
+  # environment overrides one by naming it under its own features block.
+  inventory = yamldecode(file("${path.module}/../../apps.yaml"))
+  spec      = one([for component in local.inventory.components : component if component.key == var.component])
+
+  feature_defaults = {
+    for feature in try(local.spec.features, []) :
+    feature.variable => tostring(feature.default)
+  }
+
   # Platform wiring this root owns, so a deployments file cannot forget it. Both
   # applications bind loopback by default, which inside Cloud Run means no
   # traffic ever arrives and the health check fails.
@@ -48,6 +58,7 @@ resource "google_cloud_run_v2_service" "this" {
         for_each = merge(
           local.wiring,
           { APP_ENV = each.key },
+          local.feature_defaults,
           try(lookup(each.value, "features", {}), {}),
           # Only the frontend receives this; the api stack supplies no urls.
           try({ APP_API_URL = var.api_urls[each.key] }, {}),
