@@ -18,6 +18,12 @@ variable "services" {
   type        = list(string)
 }
 
+variable "ci_api_key_id" {
+  description = "Spacelift API key GitHub Actions uses. Created by hand; empty leaves CI unbound."
+  type        = string
+  default     = ""
+}
+
 variable "github_repository" {
   description = "owner/name of the repository allowed to push images."
   type        = string

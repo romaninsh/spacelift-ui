@@ -13,15 +13,13 @@ resource "spacelift_role" "ci_dev_publisher" {
   ]
 }
 
-resource "spacelift_api_key" "ci" {
-  name = "github-actions"
-}
-
+# Spacelift refuses API key creation from non-human sessions, so the key is
+# made once in the UI and named here. Binding it stays declarative.
 resource "spacelift_role_attachment" "ci" {
-  for_each = spacelift_stack.app
+  for_each = var.ci_api_key_id == "" ? {} : spacelift_stack.app
 
   role_id    = spacelift_role.ci_dev_publisher.id
-  api_key_id = spacelift_api_key.ci.id
+  api_key_id = var.ci_api_key_id
   space_id   = "root"
   stack_id   = each.value.id
 }
