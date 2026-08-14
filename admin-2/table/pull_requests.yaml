@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=./table-schema-1.json
+datasource: appctl
+title: Pull requests
+columns:
+  - { name: number, type: int, flags: [id] }
+  - { name: title, type: string, flags: [title, searchable] }
+  - { name: state, type: string, flags: [label] }
+  - { name: review, type: string }
+  - { name: author, type: string }
+  - { name: apps, type: string }
+  - { name: url, type: string }
+  - { name: updated_at, type: string }
+cmd:
+  rhai: |
+    let args = ["prs", "list"];
+    for c in conditions {
+        if c.field == "apps" { args += ["--app", c.value]; }
+    }
+    let out = run(args);
+    if out.exit_code != 0 { throw out.stderr; }
+    parse_json(out.stdout)

@@ -1,0 +1,26 @@
+# yaml-language-server: $schema=./page-schema-1.json
+title: Environments
+body:
+  - kind: grid
+    name: environments
+    observe: environments
+    params:
+      columns:
+        order:
+          label: "#"
+          width: 60
+        key:
+          label: Key
+          width: 100
+        title:
+          label: Name
+          width: 200
+        promotes_to:
+          label: Promotes to
+          width: 140
+        approval:
+          label: Needs approval
+          width: 150
+          color: { yellow: ["true"], muted: ["false"] }
+          labels: { "true": "Yes", "false": "No" }
+      default_sort: { column: order, direction: asc }

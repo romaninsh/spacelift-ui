@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=./table-schema-1.json
+datasource: appctl
+title: Environments
+columns:
+  - { name: key, type: string, flags: [id, searchable] }
+  - { name: title, type: string, flags: [title] }
+  - { name: order, type: int }
+  - { name: promotes_to, type: string }
+  - { name: approval, type: bool }
+cmd:
+  rhai: |
+    let out = run(["envs", "list"]);
+    if out.exit_code != 0 { throw out.stderr; }
+    parse_json(out.stdout)

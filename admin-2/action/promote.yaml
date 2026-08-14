@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=./action-schema-1.json
+kind: terminal
+description: |
+  Copies the exact image digest running in ${row.env} into ${row.next_env}, then
+  commits and pushes. Spacelift picks the change up and deploys it.
+
+  appctl re-checks that ${row.env} is healthy before writing anything, so this
+  refuses on its own if the source stopped being good since the menu opened.
+dialog:
+  title: "Promote ${row.app} ${row.version}: ${row.env} to ${row.next_env}"
+  confirm_label: Promote
+terminal:
+  command: ./cli/appctl
+  args:
+    - promote
+    - --app
+    - "${row.app}"
+    - --from
+    - "${row.env}"
+    - --to
+    - "${row.next_env}"
+  cwd: /Users/rw/Work/spacelift-ui

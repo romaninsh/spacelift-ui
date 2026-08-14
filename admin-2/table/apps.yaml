@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=./table-schema-1.json
+datasource: appctl
+title: Apps
+columns:
+  - { name: key, type: string, flags: [id, searchable] }
+  - { name: title, type: string, flags: [title, searchable] }
+  - { name: kind, type: string, flags: [label] }
+  - { name: path, type: string }
+  - { name: stack, type: string }
+  - { name: tag_prefix, type: string }
+  - { name: image, type: string }
+  - { name: features, type: string }
+cmd:
+  rhai: |
+    let out = run(["apps", "list"]);
+    if out.exit_code != 0 { throw out.stderr; }
+    parse_json(out.stdout)

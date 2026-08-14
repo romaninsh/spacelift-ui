@@ -1,0 +1,63 @@
+# yaml-language-server: $schema=./page-schema-1.json
+# What is running where. Right-click a row to promote it one rung; the entry
+# only appears when appctl says the environment is healthy and the next one
+# differs.
+title: Deployments
+body:
+  - kind: grid
+    name: deployments
+    observe: deployments
+    params:
+      columns:
+        app:
+          label: App
+          width: 100
+        env:
+          label: Env
+          width: 90
+        version:
+          label: Version
+          width: 140
+        status:
+          label: Status
+          width: 120
+          color:
+            success: [healthy]
+            yellow: [deploying]
+            red: [unhealthy]
+            muted: [absent, not deployed]
+        drift:
+          label: Freshness
+          width: 110
+          color:
+            success: [current]
+            yellow: [behind]
+            muted: [absent]
+          labels:
+            current: Newest
+            behind: Behind
+            absent: —
+        running_version:
+          label: Reported
+          width: 110
+        color:
+          label: Colour
+          width: 90
+          color:
+            green: [green]
+            blue: [blue]
+            red: [red]
+            muted: [gray]
+        revision:
+          label: Revision
+          width: 190
+        url:
+          label: URL
+          width: 320
+      default_sort: { column: id, direction: asc }
+      refresh_interval: 30
+      row_actions:
+        - label: "Promote to next environment"
+          when: 'row.promotable'
+          action: |
+            actions.promote(row);

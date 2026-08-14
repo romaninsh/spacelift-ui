@@ -1,0 +1,87 @@
+# yaml-language-server: $schema=./page-schema-1.json
+# Selecting an app shows that app's environments beneath it. This is a drill
+# rather than a binder tab because `references:` is dropped for cmd tables —
+# see vista_loader.rs, where the cmd branch passes an empty reference map.
+title: Apps
+body:
+  - kind: grid
+    name: apps
+    observe: apps
+    params:
+      columns:
+        key:
+          label: App
+          width: 130
+        title:
+          label: Name
+          width: 150
+        kind:
+          label: Kind
+          width: 100
+          color:
+            blue: [service]
+            muted: [infra]
+        stack:
+          label: Stack
+          width: 110
+        image:
+          label: Image
+          width: 300
+        features:
+          label: Feature flags
+          width: 180
+      default_sort: { column: key, direction: asc }
+
+  - kind: grid
+    name: app_deployments
+    when: '${apps.selected_id} != ""'
+    observe:
+      script: |
+        scenery("deployments").where("app", "${apps.selected_id}")
+    params:
+      columns:
+        env:
+          label: Environment
+          width: 120
+        version:
+          label: Version
+          width: 140
+        status:
+          label: Status
+          width: 120
+          color:
+            success: [healthy]
+            yellow: [deploying]
+            red: [unhealthy]
+            muted: [absent, not deployed]
+        drift:
+          label: Freshness
+          width: 110
+          color:
+            success: [current]
+            yellow: [behind]
+            muted: [absent]
+          labels:
+            current: Newest
+            behind: Behind
+            absent: "—"
+        color:
+          label: Colour
+          width: 90
+          color:
+            green: [green]
+            blue: [blue]
+            red: [red]
+            muted: [gray]
+        next_env:
+          label: Promotes to
+          width: 120
+        url:
+          label: URL
+          width: 320
+      default_sort: { column: order, direction: asc }
+      row_actions:
+        - label: "Promote to next environment"
+          when: 'row.promotable'
+          action: |
+            actions.promote(row);
