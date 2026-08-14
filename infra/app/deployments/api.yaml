@@ -4,3 +4,6 @@
 dev:
   version: api-0.1.0
   digest: sha256:fa580c352e27017b9544d9bf76e0a6d99e815c7c497632957abadc0ce9882e16
+uat:
+  version: api-0.1.0
+  digest: sha256:fa580c352e27017b9544d9bf76e0a6d99e815c7c497632957abadc0ce9882e16
