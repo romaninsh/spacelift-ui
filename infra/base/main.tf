@@ -8,7 +8,12 @@ locals {
     "sts.googleapis.com",
   ]
 
-  registry = "${var.region}-docker.pkg.dev/${var.project}/${var.repository}"
+  # One repository per app, shared across environments — the same artifact is
+  # promoted from dev to prd, so splitting by environment would defeat that.
+  images = {
+    for service in var.services :
+    service => "${var.region}-docker.pkg.dev/${var.project}/${service}/${service}"
+  }
 
   runtime_accounts = {
     for pair in setproduct(var.services, var.environments) :
@@ -24,12 +29,14 @@ resource "google_project_service" "this" {
   disable_on_destroy = false
 }
 
-resource "google_artifact_registry_repository" "apps" {
+resource "google_artifact_registry_repository" "app" {
+  for_each = toset(var.services)
+
   project       = var.project
   location      = var.region
-  repository_id = var.repository
+  repository_id = each.value
   format        = "DOCKER"
-  description   = "Application images promoted by digest across environments."
+  description   = "${each.value} images, promoted by digest across environments."
 
   depends_on = [google_project_service.this]
 }
@@ -91,9 +98,11 @@ resource "google_service_account_iam_member" "ci_workload_identity" {
 }
 
 resource "google_artifact_registry_repository_iam_member" "ci_writer" {
+  for_each = google_artifact_registry_repository.app
+
   project    = var.project
-  location   = google_artifact_registry_repository.apps.location
-  repository = google_artifact_registry_repository.apps.name
+  location   = each.value.location
+  repository = each.value.name
   role       = "roles/artifactregistry.writer"
   member     = "serviceAccount:${google_service_account.ci.email}"
 }

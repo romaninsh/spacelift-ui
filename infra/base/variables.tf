@@ -8,12 +8,6 @@ variable "region" {
   type        = string
 }
 
-variable "repository" {
-  description = "Artifact Registry repository name."
-  type        = string
-  default     = "apps"
-}
-
 variable "environments" {
   description = "Environment keys, in promotion order."
   type        = list(string)

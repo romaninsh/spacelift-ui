@@ -15,8 +15,8 @@ variable "region" {
   type        = string
 }
 
-variable "registry" {
-  description = "Base image path. Supplied by the base stack."
+variable "image" {
+  description = "Image path without a digest, e.g. europe-west2-docker.pkg.dev/p/api/api. Supplied by the base stack."
   type        = string
 }
 

@@ -38,7 +38,7 @@ resource "google_cloud_run_v2_service" "this" {
     }
 
     containers {
-      image = "${var.registry}/${var.component}@${each.value.digest}"
+      image = "${var.image}@${each.value.digest}"
 
       ports {
         container_port = var.port

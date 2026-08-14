@@ -1,10 +1,12 @@
 # Inventory of what exists. Deliberately carries no versions: the desired
-# version of a component lives in infra/stacks/<component>/deploy.auto.tfvars,
-# and the running version is read back from Cloud Run.
+# version of a component lives in infra/app/deployments/<component>.yaml, and
+# the running version is read back from Cloud Run.
 
 project: inlaid-agility-461020-e4
 region: europe-west2
-registry: europe-west2-docker.pkg.dev/inlaid-agility-461020-e4/apps
+
+# One Artifact Registry repository per app, shared across environments.
+registry: europe-west2-docker.pkg.dev/inlaid-agility-461020-e4
 
 components:
   - key: base
@@ -20,7 +22,7 @@ components:
     path: api
     stack: api
     tag_prefix: api-
-    image: api
+    image: api/api
     service: api-{env}
     port: 8080
     features:
@@ -35,7 +37,7 @@ components:
     path: frontend
     stack: frontend
     tag_prefix: frontend-
-    image: frontend
+    image: frontend/frontend
     service: frontend-{env}
     port: 8080
     features:

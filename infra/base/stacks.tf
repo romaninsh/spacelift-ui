@@ -50,12 +50,12 @@ resource "spacelift_environment_variable" "region" {
   write_only = false
 }
 
-resource "spacelift_environment_variable" "registry" {
+resource "spacelift_environment_variable" "image" {
   for_each = spacelift_stack.app
 
   stack_id   = each.value.id
-  name       = "TF_VAR_registry"
-  value      = local.registry
+  name       = "TF_VAR_image"
+  value      = local.images[each.key]
   write_only = false
 }
 

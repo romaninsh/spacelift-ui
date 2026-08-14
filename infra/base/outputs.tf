@@ -1,6 +1,6 @@
-output "registry" {
-  description = "Base path images are published under."
-  value       = local.registry
+output "images" {
+  description = "Image path per service, without a tag or digest."
+  value       = local.images
 }
 
 output "ci_service_account" {
