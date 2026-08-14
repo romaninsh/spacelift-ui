@@ -1,4 +1,5 @@
 [tools]
 node = "24"
 opentofu = "1"
+spacectl = "1"
 yq = "4"
