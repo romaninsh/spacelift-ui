@@ -139,9 +139,8 @@ jobs:
           git tag -a "$TAG" -m "$TAG" "${{ github.sha }}"
           git push origin "$TAG"
 
-      # Dev is the only environment CI can reach: its credential is bound to
-      # these two stacks, and a plan policy rejects a CI-triggered run that
-      # touches anything else. Promotion above dev is a human action.
+      # Dev has its own stack, so CI cannot reach any other environment even by
+      # accident. Promotion above dev is a human action.
       - name: Deploy to dev
         env:
           SPACELIFT_API_KEY_ENDPOINT: ${{ secrets.SPACELIFT_API_KEY_ENDPOINT }}
@@ -154,8 +153,8 @@ jobs:
           set -euo pipefail
           test -n "$DIGEST"
           document=$(jq -cn --arg v "$TAG" --arg d "$DIGEST" '{version:$v,digest:$d}')
-          spacectl stack environment setvar --id "$COMPONENT" TF_VAR_deploy_dev "$document"
-          spacectl stack deploy --id "$COMPONENT"
+          spacectl stack environment setvar --id "$COMPONENT-dev" TF_VAR_deploy "$document"
+          spacectl stack deploy --id "$COMPONENT-dev"
 
       - name: Summary
         env:
