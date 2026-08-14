@@ -3,8 +3,13 @@ variable "component" {
   type        = string
 }
 
+variable "environment" {
+  description = "Environment this stack owns, e.g. stg. Set by the base stack."
+  type        = string
+}
+
 variable "project" {
-  description = "GCP project hosting the services."
+  description = "GCP project hosting the service."
   type        = string
 }
 
@@ -18,33 +23,16 @@ variable "image" {
   type        = string
 }
 
-variable "api_urls" {
-  description = "Api URL per environment, from the api stack. Empty for the api itself."
-  type        = map(string)
-  default     = {}
+variable "api_url" {
+  description = "Api URL in this environment, from the matching api stack. Empty for the api itself."
+  type        = string
+  default     = ""
 }
 
-# What is deployed where. One JSON document per environment — {version, digest,
-# features} — held as a stack variable rather than in the repository, so a
-# release or a promotion is an API call and never a commit. Empty means the
-# environment has no service. Deliberately not managed by the base stack, which
-# would otherwise revert every release on its next apply.
-variable "deploy_dev" {
-  type    = string
-  default = ""
-}
-
-variable "deploy_uat" {
-  type    = string
-  default = ""
-}
-
-variable "deploy_stg" {
-  type    = string
-  default = ""
-}
-
-variable "deploy_prd" {
+# What this environment runs: {version, digest, features} as JSON, held as a
+# stack variable rather than in the repository, so a release or a promotion is
+# an API call and never a commit. Empty means nothing is deployed here.
+variable "deploy" {
   type    = string
   default = ""
 }

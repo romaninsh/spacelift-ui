@@ -14,6 +14,6 @@ output "workload_identity_provider" {
 }
 
 output "stack_ids" {
-  description = "Spacelift stack per service."
+  description = "Spacelift stack per service per environment."
   value       = { for key, stack in spacelift_stack.app : key => stack.id }
 }

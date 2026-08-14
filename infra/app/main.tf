@@ -1,18 +1,7 @@
 locals {
-  # The promotion surface, one stack variable per environment.
-  declared = {
-    dev = var.deploy_dev
-    uat = var.deploy_uat
-    stg = var.deploy_stg
-    prd = var.deploy_prd
-  }
+  deployment = var.deploy == "" ? null : jsondecode(var.deploy)
+  deployed   = local.deployment == null ? {} : { this = local.deployment }
 
-  deployments = {
-    for env, document in local.declared : env => jsondecode(document) if document != ""
-  }
-
-  # Feature flags and their defaults are declared once, in the inventory. An
-  # environment overrides one by naming it under its own features block.
   inventory = yamldecode(file("${path.module}/../../apps.yaml"))
   spec      = one([for component in local.inventory.components : component if component.key == var.component])
 
@@ -21,19 +10,20 @@ locals {
     feature.variable => tostring(feature.default)
   }
 
-  # Platform wiring this root owns, so a deployments file cannot forget it. Both
-  # applications bind loopback by default, which inside Cloud Run means no
+  # Platform wiring this root owns, so a deployment document cannot forget it.
+  # Both applications bind loopback by default, which inside Cloud Run means no
   # traffic ever arrives and the health check fails.
   wiring = {
     SERVICE_HOST = "0.0.0.0"
     SERVICE_PORT = tostring(var.port)
+    APP_ENV      = var.environment
   }
 }
 
 resource "google_cloud_run_v2_service" "this" {
-  for_each = local.deployments
+  for_each = local.deployed
 
-  name                = "${var.component}-${each.key}"
+  name                = "${var.component}-${var.environment}"
   project             = var.project
   location            = var.region
   ingress             = "INGRESS_TRAFFIC_ALL"
@@ -41,17 +31,16 @@ resource "google_cloud_run_v2_service" "this" {
 
   labels = {
     component   = var.component
-    environment = each.key
+    environment = var.environment
     version     = replace(each.value.version, ".", "-")
   }
 
   template {
     # Naming matches the accounts the base stack creates, so the two stay in
     # step without passing a map between stacks.
-    service_account = "run-${var.component}-${each.key}@${var.project}.iam.gserviceaccount.com"
+    service_account = "run-${var.component}-${var.environment}@${var.project}.iam.gserviceaccount.com"
 
     scaling {
-      min_instance_count = 0
       max_instance_count = var.max_instances
     }
 
@@ -65,11 +54,9 @@ resource "google_cloud_run_v2_service" "this" {
       dynamic "env" {
         for_each = merge(
           local.wiring,
-          { APP_ENV = each.key },
           local.feature_defaults,
-          try(lookup(each.value, "features", {}), {}),
-          # Only the frontend receives this; the api stack supplies no urls.
-          try({ APP_API_URL = var.api_urls[each.key] }, {}),
+          try(each.value.features, {}),
+          var.api_url == "" ? {} : { APP_API_URL = var.api_url },
         )
 
         content {
@@ -101,7 +88,7 @@ resource "google_cloud_run_v2_service" "this" {
       # Promoting a tag would let the resolved artifact drift between
       # environments. Only a digest promotes the thing that was tested.
       condition     = can(regex("^sha256:[0-9a-f]{64}$", each.value.digest))
-      error_message = "${var.component}/${each.key}: digest must be sha256:<64 hex>, got ${each.value.digest}."
+      error_message = "${var.component}/${var.environment}: digest must be sha256:<64 hex>, got ${each.value.digest}."
     }
   }
 }
