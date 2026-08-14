@@ -1,14 +1,9 @@
 name: release
 
-# Releases are driven by the manifest, not by a hand-made tag: land a version
-# change on main and that component ships. Several can change in one push, and
-# each is released independently.
+# Landing a version change on main builds that component and tags the commit.
 on:
   push:
     branches: [main]
-  # Escape hatch: release a component at whatever version main already
-  # declares, for when the version landed before this workflow existed or a
-  # run failed after the merge.
   workflow_dispatch:
     inputs:
       component:
@@ -21,7 +16,6 @@ permissions:
   contents: write
   id-token: write
 
-# Each release commits back to main, so two overlapping runs would fight.
 concurrency:
   group: release-main
   cancel-in-progress: false
@@ -29,7 +23,6 @@ concurrency:
 env:
   REGISTRY: europe-west2-docker.pkg.dev
   PROJECT: inlaid-agility-461020-e4
-  # Both published by the base stack as outputs.
   WORKLOAD_IDENTITY_PROVIDER: projects/129027965449/locations/global/workloadIdentityPools/github/providers/github
   SERVICE_ACCOUNT: github-actions@inlaid-agility-461020-e4.iam.gserviceaccount.com
 
@@ -42,6 +35,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - uses: jdx/mise-action@v2
 
       - name: Which components changed version
         id: changed
@@ -90,10 +84,11 @@ jobs:
     if: needs.detect.outputs.releases != '[]'
     runs-on: ubuntu-latest
     strategy:
-      # Each job commits to main; serialise so they never race.
       max-parallel: 1
       matrix:
         include: ${{ fromJson(needs.detect.outputs.releases) }}
+    env:
+      IMAGE: europe-west2-docker.pkg.dev/inlaid-agility-461020-e4/${{ matrix.component }}/${{ matrix.component }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -123,13 +118,12 @@ jobs:
           build-args: |
             APP_VERSION=${{ matrix.component }}-${{ matrix.version }}
           tags: |
-            ${{ env.REGISTRY }}/${{ env.PROJECT }}/${{ matrix.component }}/${{ matrix.component }}:${{ matrix.version }}
-            ${{ env.REGISTRY }}/${{ env.PROJECT }}/${{ matrix.component }}/${{ matrix.component }}:sha-${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+            ${{ env.IMAGE }}:${{ matrix.version }}
+            ${{ env.IMAGE }}:sha-${{ github.sha }}
+          cache-from: type=registry,ref=${{ env.IMAGE }}:cache
+          cache-to: type=registry,ref=${{ env.IMAGE }}:cache,mode=max,image-manifest=true,oci-mediatypes=true
 
-      # Only once the artifact is really in the registry — the tag marks the
-      # commit an image exists for, so it must not run ahead of the push.
+      # Only once the artifact is really in the registry.
       - name: Tag the released commit
         env:
           TAG: ${{ matrix.component }}-${{ matrix.version }}
@@ -144,30 +138,15 @@ jobs:
           git tag -a "$TAG" -m "$TAG" "${{ github.sha }}"
           git push origin "$TAG"
 
-      - name: Install yq
-        run: |
-          sudo curl -fsSL -o /usr/local/bin/yq \
-            https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64
-          sudo chmod +x /usr/local/bin/yq
-
-      # Dev is always the newest build, with no human in the loop. Every
-      # environment above it receives this same digest by explicit promotion.
-      - name: Pin the digest for dev
+      - name: Summary
         env:
-          COMPONENT: ${{ matrix.component }}
           TAG: ${{ matrix.component }}-${{ matrix.version }}
           DIGEST: ${{ steps.build.outputs.digest }}
         run: |
-          set -euo pipefail
-          test -n "$DIGEST"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          yq -i ".dev.version = \"$TAG\" | .dev.digest = \"$DIGEST\"" \
-            "infra/app/deployments/${COMPONENT}.yaml"
-          if git diff --quiet; then
-            echo "dev already pinned to $DIGEST"
-            exit 0
-          fi
-          git commit -am "$COMPONENT: deploy $TAG to dev"
-          git pull --rebase origin main
-          git push origin HEAD:main
+          {
+            echo "### $TAG"
+            echo
+            echo '```'
+            echo "$IMAGE@$DIGEST"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

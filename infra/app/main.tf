@@ -1,7 +1,15 @@
 locals {
-  # The promotion surface. One entry per environment this component is deployed
-  # to; an environment absent from the file has no service.
-  deployments = yamldecode(file("${path.module}/deployments/${var.component}.yaml"))
+  # The promotion surface, one stack variable per environment.
+  declared = {
+    dev = var.deploy_dev
+    uat = var.deploy_uat
+    stg = var.deploy_stg
+    prd = var.deploy_prd
+  }
+
+  deployments = {
+    for env, document in local.declared : env => jsondecode(document) if document != ""
+  }
 
   # Feature flags and their defaults are declared once, in the inventory. An
   # environment overrides one by naming it under its own features block.

@@ -1,0 +1,4 @@
+[tools]
+node = "24"
+opentofu = "1"
+yq = "4"
