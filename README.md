@@ -58,3 +58,39 @@ and 4-5 envs, managing this all is diffcult, so we introduce simple rule - you c
 push app version if it's used in lower environmen and that enviromnent is healthy.
 
 Both app versions and feature flag values are stored in spacelift.
+
+## Terraform stacks
+
+While I have included some basic stack, you can create logic around feature flags or add more
+features in app deployment. This does not affect a basic principle of this example, start
+with a simple concept, then grow it.
+
+## appctl
+
+This command is a wrapper designed for 2 things
+ - retrieve things from APIs and output as json
+ - execute version promotions safely.
+
+Vantage UI supports a `cmd` backend, which is this app exactly. It will source your infrastructrue
+data and visualise but also provide interractivity.
+
+# End-to-end walk
+
+Clone this repo, then create stacks in your own spacelift account, connect your GCP and deploy dev
+stack. Edit apps.yml to configure your applications and environments.
+
+Raise PR - make sure tests pass, bump version, merge. On merge artifact should be deployed if OIDC in
+base is configured correctly.
+
+This should also trigger `dev` stack deployment (for whicever app you changed version).
+
+Open frontend URL (you can find in GCP cloud-run console), and you should see green bubbles raising
+on the screen.
+
+## Use Vantage UI
+
+Download vantage-ui, open `admin` folder and make sure your spacectl is authenticated. UI should
+work out of the box and you should be able to promote app versions and maybe even edit feature
+flags.
+
+When you deploy new `api` version, it should reflect on the frontend screen.
