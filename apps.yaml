@@ -4,10 +4,8 @@
 
 project: inlaid-agility-461020-e4
 region: europe-west2
-
 # One Artifact Registry repository per app, shared across environments.
 registry: europe-west2-docker.pkg.dev/inlaid-agility-461020-e4
-
 components:
   - key: base
     title: Base
@@ -15,7 +13,6 @@ components:
     path: infra/base
     stack: base
     tag_prefix: base-
-
   - key: api
     title: API
     kind: service
@@ -30,7 +27,7 @@ components:
         title: Bubble colour
         variable: APP_COLOR
         default: green
-
+    health: /version
   - key: frontend
     title: Frontend
     kind: service
@@ -45,7 +42,7 @@ components:
         title: Bubble spawn rate
         variable: APP_SPAWN_SPEED
         default: '2'
-
+    health: /
 environments:
   - key: dev
     title: Development

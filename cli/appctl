@@ -1,0 +1,379 @@
+#!/usr/bin/env python3
+"""appctl — what exists, what is running where, and what may be promoted.
+
+Every subcommand prints JSON to stdout, which is what lets Vantage treat this
+as a table source. Nothing here holds state: the desired version is read from
+infra/app/deployments/<component>.yaml, and the running version is read back
+from Cloud Run.
+
+Depends only on the standard library plus the CLIs it fronts: yq, gcloud, gh
+and git.
+"""
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+import urllib.error
+import urllib.request
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+
+HEALTH_TIMEOUT = 10
+
+
+class Failure(Exception):
+    """Anything the user should see as a plain message rather than a traceback."""
+
+
+def run(args, check=True, cwd=None):
+    result = subprocess.run(args, capture_output=True, text=True, cwd=cwd)
+    if check and result.returncode != 0:
+        raise Failure(f"{args[0]} failed: {result.stderr.strip() or result.stdout.strip()}")
+    return result
+
+
+def repo_root():
+    """APPCTL_REPO when set — how Vantage points at it — else walk up."""
+    if "APPCTL_REPO" in os.environ:
+        root = Path(os.environ["APPCTL_REPO"])
+        if not (root / "apps.yaml").is_file():
+            raise Failure(f"APPCTL_REPO={root} has no apps.yaml")
+        return root
+
+    for candidate in [Path.cwd(), *Path.cwd().parents]:
+        if (candidate / "apps.yaml").is_file():
+            return candidate
+    raise Failure("no apps.yaml in any parent directory; set APPCTL_REPO")
+
+
+def read_yaml(path):
+    return json.loads(run(["yq", "-o=json", ".", str(path)]).stdout)
+
+
+def inventory(root):
+    return read_yaml(root / "apps.yaml")
+
+
+def deployments_path(root, app):
+    return root / "infra" / "app" / "deployments" / f"{app}.yaml"
+
+
+def deployments(root, app):
+    return read_yaml(deployments_path(root, app)) or {}
+
+
+def component(inv, key):
+    for item in inv["components"]:
+        if item["key"] == key:
+            return item
+    raise Failure(f"no component '{key}' in apps.yaml")
+
+
+def environment(inv, key):
+    for item in inv["environments"]:
+        if item["key"] == key:
+            return item
+    raise Failure(f"no environment '{key}' in apps.yaml")
+
+
+def services(inv):
+    return [c for c in inv["components"] if c["kind"] == "service"]
+
+
+def version_key(version):
+    """Sort key for api-1.2.3 style versions; unparseable sorts lowest."""
+    tail = version.rsplit("-", 1)[-1] if version else ""
+    try:
+        return tuple(int(part) for part in tail.split("."))
+    except ValueError:
+        return (-1,)
+
+
+# --- Cloud Run ---------------------------------------------------------------
+
+
+def describe(inv, app, env):
+    """What Cloud Run says is running. None when the service does not exist."""
+    spec = component(inv, app)
+    name = spec["service"].replace("{env}", env)
+    result = run(
+        [
+            "gcloud", "run", "services", "describe", name,
+            f"--region={inv['region']}", f"--project={inv['project']}",
+            "--format=json",
+        ],
+        check=False,
+    )
+    if result.returncode != 0:
+        return None
+
+    served = json.loads(result.stdout)
+    conditions = served.get("status", {}).get("conditions", [])
+    ready = any(c.get("type") == "Ready" and c.get("status") == "True" for c in conditions)
+    containers = (
+        served.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [])
+    )
+    image = containers[0].get("image", "") if containers else ""
+
+    return {
+        "url": served.get("status", {}).get("url"),
+        "ready": ready,
+        "image": image,
+        "digest": image.split("@", 1)[1] if "@" in image else None,
+        "revision": served.get("status", {}).get("latestReadyRevisionName"),
+    }
+
+
+def probe(url, path):
+    """Fetch the component's health path. Returns (ok, parsed body or None)."""
+    if not url or not path:
+        return False, None
+    try:
+        with urllib.request.urlopen(url.rstrip("/") + path, timeout=HEALTH_TIMEOUT) as reply:
+            body = reply.read().decode("utf-8", "replace")
+            if not 200 <= reply.status < 300:
+                return False, None
+            try:
+                return True, json.loads(body)
+            except json.JSONDecodeError:
+                return True, None
+    except (urllib.error.URLError, TimeoutError, OSError):
+        return False, None
+
+
+# --- rows --------------------------------------------------------------------
+
+
+def deployment_rows(root, inv, only_app=None, only_env=None):
+    wanted = [c for c in services(inv) if only_app in (None, c["key"])]
+    envs = [e for e in inv["environments"] if only_env in (None, e["key"])]
+    desired = {c["key"]: deployments(root, c["key"]) for c in wanted}
+
+    def build(pair):
+        spec, env = pair
+        app, key = spec["key"], env["key"]
+        want = desired[app].get(key) or {}
+        live = describe(inv, app, key)
+        healthy, body = (False, None)
+        if live and live["ready"]:
+            healthy, body = probe(live["url"], spec.get("health"))
+
+        if not want:
+            status = "absent"
+        elif not live:
+            status = "not deployed"
+        elif live["digest"] != want.get("digest"):
+            status = "deploying"
+        elif healthy:
+            status = "healthy"
+        else:
+            status = "unhealthy"
+
+        return {
+            "id": f"{app}/{key}",
+            "app": app,
+            "app_title": spec["title"],
+            "env": key,
+            "env_title": env["title"],
+            "order": env["order"],
+            "version": want.get("version"),
+            "digest": want.get("digest"),
+            "running_digest": live["digest"] if live else None,
+            "running_version": (body or {}).get("version"),
+            "color": (body or {}).get("color"),
+            "url": live["url"] if live else None,
+            "revision": live["revision"] if live else None,
+            "ready": bool(live and live["ready"]),
+            "healthy": healthy,
+            "status": status,
+            "next_env": env.get("promotes_to"),
+            "approval": env.get("approval", False),
+        }
+
+    pairs = [(spec, env) for spec in wanted for env in envs]
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        rows = list(pool.map(build, pairs))
+
+    # Freshness is relative to the newest version this app has anywhere, and
+    # promotability is decided here so callers never re-derive the rule.
+    for spec in wanted:
+        mine = [r for r in rows if r["app"] == spec["key"]]
+        newest = max((version_key(r["version"]) for r in mine if r["version"]), default=None)
+        for row in mine:
+            if not row["version"]:
+                row["drift"] = "absent"
+            elif newest and version_key(row["version"]) == newest:
+                row["drift"] = "current"
+            else:
+                row["drift"] = "behind"
+
+            target = next(
+                (r for r in mine if r["env"] == row["next_env"]), None
+            ) if row["next_env"] else None
+            row["promotable"] = bool(
+                row["status"] == "healthy"
+                and target is not None
+                and target.get("digest") != row["digest"]
+            )
+            row["promote_label"] = (
+                f"Promote {row['app']} {row['version']} to {row['next_env']}"
+                if row["promotable"] else ""
+            )
+
+    rows.sort(key=lambda r: (r["app"], r["order"]))
+    return rows
+
+
+# --- commands ----------------------------------------------------------------
+
+
+def cmd_apps(args, root, inv):
+    return [
+        {
+            "key": c["key"],
+            "title": c["title"],
+            "kind": c["kind"],
+            "path": c["path"],
+            "stack": c["stack"],
+            "tag_prefix": c["tag_prefix"],
+            "image": c.get("image"),
+            "features": ", ".join(f["variable"] for f in c.get("features") or []),
+        }
+        for c in inv["components"]
+    ]
+
+
+def cmd_envs(args, root, inv):
+    return inv["environments"]
+
+
+def cmd_deployments(args, root, inv):
+    return deployment_rows(root, inv, args.app, args.env)
+
+
+def cmd_prs(args, root, inv):
+    result = run(
+        [
+            "gh", "pr", "list", "--state=open", "--limit=100",
+            "--json=number,title,isDraft,reviewDecision,author,url,files,updatedAt",
+        ],
+        cwd=str(root),
+    )
+    rows = []
+    for pr in json.loads(result.stdout):
+        paths = [f["path"] for f in pr.get("files") or []]
+        touched = sorted({
+            c["key"] for c in inv["components"]
+            if any(p.startswith(c["path"] + "/") for p in paths)
+        })
+        if args.app and args.app not in touched:
+            continue
+        rows.append({
+            "number": pr["number"],
+            "title": pr["title"],
+            "state": "draft" if pr["isDraft"] else "review",
+            "review": pr.get("reviewDecision") or "PENDING",
+            "author": (pr.get("author") or {}).get("login"),
+            "apps": ", ".join(touched),
+            "url": pr["url"],
+            "updated_at": pr["updatedAt"],
+        })
+    return rows
+
+
+def cmd_promote(args, root, inv):
+    source = environment(inv, args.source)
+    environment(inv, args.target)
+
+    # One rung at a time: the ladder is the point.
+    if source.get("promotes_to") != args.target:
+        raise Failure(
+            f"{args.source} promotes to {source.get('promotes_to')}, not {args.target}"
+        )
+
+    rows = deployment_rows(root, inv, only_app=args.app)
+    from_row = next(r for r in rows if r["env"] == args.source)
+    to_row = next(r for r in rows if r["env"] == args.target)
+
+    if not from_row["version"]:
+        raise Failure(f"{args.app} has nothing deployed in {args.source}")
+
+    if from_row["status"] != "healthy" and not args.force:
+        raise Failure(
+            f"{args.app} in {args.source} is '{from_row['status']}', not healthy — "
+            f"refusing to promote it. Use --force to override."
+        )
+
+    if to_row["digest"] == from_row["digest"]:
+        return {
+            "promoted": False,
+            "reason": f"{args.target} already runs {from_row['version']}",
+        }
+
+    path = deployments_path(root, args.app)
+    expression = (
+        f'.{args.target}.version = "{from_row["version"]}" | '
+        f'.{args.target}.digest = "{from_row["digest"]}"'
+    )
+    result = {
+        "promoted": not args.dry_run,
+        "app": args.app,
+        "from": args.source,
+        "to": args.target,
+        "version": from_row["version"],
+        "digest": from_row["digest"],
+        "replaced": to_row["version"],
+        "file": str(path.relative_to(root)),
+    }
+    if args.dry_run:
+        result["expression"] = expression
+        return result
+
+    run(["yq", "-i", expression, str(path)])
+    message = f"{args.app}: promote {from_row['version']} to {args.target}"
+    run(["git", "add", str(path)], cwd=str(root))
+    run(["git", "commit", "-m", message], cwd=str(root))
+    run(["git", "push", "origin", "HEAD"], cwd=str(root))
+    result["commit"] = run(["git", "rev-parse", "--short", "HEAD"], cwd=str(root)).stdout.strip()
+    return result
+
+
+def main():
+    parser = argparse.ArgumentParser(prog="appctl", description=__doc__.splitlines()[0])
+    sub = parser.add_subparsers(dest="group", required=True)
+
+    for group, handler, adder in [
+        ("apps", cmd_apps, None),
+        ("envs", cmd_envs, None),
+        ("deployments", cmd_deployments, lambda p: (
+            p.add_argument("--app"), p.add_argument("--env"))),
+        ("prs", cmd_prs, lambda p: p.add_argument("--app")),
+    ]:
+        group_parser = sub.add_parser(group).add_subparsers(dest="action", required=True)
+        listing = group_parser.add_parser("list")
+        if adder:
+            adder(listing)
+        listing.set_defaults(handler=handler)
+
+    promote = sub.add_parser("promote", help="copy a digest to the next environment")
+    promote.add_argument("--app", required=True)
+    promote.add_argument("--from", dest="source", required=True)
+    promote.add_argument("--to", dest="target", required=True)
+    promote.add_argument("--dry-run", action="store_true")
+    promote.add_argument("--force", action="store_true", help="promote an unhealthy source")
+    promote.set_defaults(handler=cmd_promote)
+
+    args = parser.parse_args()
+    try:
+        root = repo_root()
+        print(json.dumps(args.handler(args, root, inventory(root)), indent=2))
+    except Failure as failure:
+        print(str(failure), file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
