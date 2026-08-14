@@ -1,0 +1,33 @@
+# yaml-language-server: $schema=./action-schema-1.json
+# Live Cloud Run request logs for one deployed service. The default tail only
+# carries container stdout/stderr, and neither app writes any, so this filters
+# to the request log — which is where status codes actually show up.
+kind: stream
+dialog:
+  title: "Logs — ${row.app} in ${row.env}"
+  size: lg
+stream:
+  # Absolute: actions take no env: block, and Vantage's inherited PATH has no
+  # Homebrew on it.
+  command: /opt/homebrew/bin/gcloud
+  args:
+    - beta
+    - run
+    - services
+    - logs
+    - tail
+    - "${row.app}-${row.env}"
+    - --project=inlaid-agility-461020-e4
+    - --region=europe-west2
+    - --log-filter=logName:"requests"
+  # Lines read "2026-08-14 20:48:00 GET 404 https://…" — the status is the
+  # fourth field, so colour off that rather than pattern-matching the whole line.
+  filter: |
+    |line| {
+        let parts = line.split(" ");
+        if parts.len() < 4 { return line; }
+        let status = parts[3];
+        if status.starts_with("5") { #{ message: line, level: "error" } }
+        else if status.starts_with("4") { #{ message: line, level: "warn" } }
+        else { line }
+    }

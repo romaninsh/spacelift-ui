@@ -27,6 +27,18 @@ class Failure(Exception):
     """Anything the user should see as a plain message rather than a traceback."""
 
 
+def ensure_path():
+    """GUI callers (Vantage actions) inherit the launchd PATH, which has no
+    Homebrew on it — so yq, gcloud and gh all vanish. Put them back."""
+    current = os.environ.get("PATH", "").split(os.pathsep)
+    missing = [
+        d for d in ("/opt/homebrew/bin", "/usr/local/bin")
+        if d not in current and os.path.isdir(d)
+    ]
+    if missing:
+        os.environ["PATH"] = os.pathsep.join(missing + current)
+
+
 def run(args, check=True, cwd=None):
     result = subprocess.run(args, capture_output=True, text=True, cwd=cwd)
     if check and result.returncode != 0:
@@ -366,6 +378,7 @@ def main():
     promote.set_defaults(handler=cmd_promote)
 
     args = parser.parse_args()
+    ensure_path()
     try:
         root = repo_root()
         print(json.dumps(args.handler(args, root, inventory(root)), indent=2))
