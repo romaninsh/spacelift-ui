@@ -7,3 +7,6 @@ dev:
 uat:
   version: frontend-0.1.0
   digest: sha256:5760722fa0c21831fe896588e050f8c3bf2987f34194fc40b7fdb2781e986953
+stg:
+  version: frontend-0.1.0
+  digest: sha256:5760722fa0c21831fe896588e050f8c3bf2987f34194fc40b7fdb2781e986953
