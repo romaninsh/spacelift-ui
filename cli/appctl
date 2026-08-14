@@ -2,12 +2,12 @@
 """appctl — what exists, what is running where, and what may be promoted.
 
 Every subcommand prints JSON to stdout, which is what lets Vantage treat this
-as a table source. Nothing here holds state: the desired version is read from
-infra/app/deployments/<component>.yaml, and the running version is read back
-from Cloud Run.
+as a table source. Nothing here holds state: what each environment should run
+is a Spacelift stack variable, and what it actually runs is read back from
+Cloud Run.
 
 Depends only on the standard library plus the CLIs it fronts: yq, gcloud, gh
-and git.
+and spacectl.
 """
 
 import argparse
@@ -70,7 +70,7 @@ def inventory(root):
 
 # --- Spacelift ---------------------------------------------------------------
 
-DEPLOY_PREFIX = "TF_VAR_deploy_"
+DEPLOY_VARIABLE = "TF_VAR_deploy"
 
 
 def load_credentials(root):
@@ -96,25 +96,35 @@ def graphql(query):
     return body["data"]
 
 
-def deployments(app):
-    """What each environment is pinned to, held as one stack variable per
-    environment rather than in the repository."""
-    stack = graphql('{ stack(id:"%s") { config { id value } } }' % app)["stack"]
-    if stack is None:
-        raise Failure(f"no Spacelift stack '{app}'")
-    return {
-        item["id"].removeprefix(DEPLOY_PREFIX): json.loads(item["value"])
-        for item in stack["config"]
-        if item["id"].startswith(DEPLOY_PREFIX) and item["value"]
-    }
+def stack_id(app, env):
+    """One stack per service per environment, so production changes can never
+    ride along with a lower environment's run."""
+    return f"{app}-{env}"
+
+
+def deployments(app, envs):
+    """What each environment is pinned to, held as a stack variable rather than
+    in the repository. One query per environment, run concurrently."""
+    def read(env):
+        stack = graphql('{ stack(id:"%s") { config { id value } } }' % stack_id(app, env))["stack"]
+        if stack is None:
+            return env, None
+        for item in stack["config"]:
+            if item["id"] == DEPLOY_VARIABLE and item["value"]:
+                return env, json.loads(item["value"])
+        return env, None
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        return {env: found for env, found in pool.map(read, envs) if found}
 
 
 def set_deployment(app, env, document):
+    stack = stack_id(app, env)
     run([
         "spacectl", "stack", "environment", "setvar",
-        "--id", app, f"{DEPLOY_PREFIX}{env}", json.dumps(document, sort_keys=True),
+        "--id", stack, DEPLOY_VARIABLE, json.dumps(document, sort_keys=True),
     ])
-    run(["spacectl", "stack", "deploy", "--id", app])
+    run(["spacectl", "stack", "deploy", "--id", stack])
 
 
 def find(items, key, what):
@@ -195,7 +205,8 @@ def probe(url, path):
 def deployment_rows(root, inv, only_app=None, only_env=None):
     wanted = [c for c in services(inv) if only_app in (None, c["key"])]
     envs = [e for e in inv["environments"] if only_env in (None, e["key"])]
-    desired = {c["key"]: deployments(c["key"]) for c in wanted}
+    env_keys = [e["key"] for e in inv["environments"]]
+    desired = {c["key"]: deployments(c["key"], env_keys) for c in wanted}
 
     def build(pair):
         spec, env = pair
@@ -347,7 +358,7 @@ def cmd_promote(args, root, inv):
 
     # The artifact moves; the target keeps its own feature flags, which are
     # environment configuration rather than part of what was built.
-    current = deployments(args.app)
+    current = deployments(args.app, [args.target])
     document = {
         **current.get(args.target, {}),
         "version": from_row["version"],
@@ -362,7 +373,7 @@ def cmd_promote(args, root, inv):
         "version": from_row["version"],
         "digest": from_row["digest"],
         "replaced": to_row["version"],
-        "variable": f"{DEPLOY_PREFIX}{args.target}",
+        "stack": stack_id(args.app, args.target),
     }
     if args.dry_run:
         result["document"] = document
@@ -377,7 +388,7 @@ def cmd_features(args, root, inv):
     for spec in services(inv):
         if args.app not in (None, spec["key"]):
             continue
-        pinned = deployments(spec["key"])
+        pinned = deployments(spec["key"], [e["key"] for e in inv["environments"]])
         for env in inv["environments"]:
             if args.env not in (None, env["key"]):
                 continue
@@ -405,7 +416,7 @@ def cmd_feature_set(args, root, inv):
     feature = find(spec.get("features") or [], args.key, f"feature on {args.app}")
     find(inv["environments"], args.env, "environment")
 
-    pinned = deployments(args.app)
+    pinned = deployments(args.app, [args.env])
     if args.env not in pinned:
         raise Failure(
             f"{args.app} has nothing deployed in {args.env} — "
