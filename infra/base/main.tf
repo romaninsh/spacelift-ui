@@ -21,6 +21,10 @@ locals {
   }
 }
 
+data "google_project" "this" {
+  project_id = var.project
+}
+
 resource "google_project_service" "this" {
   for_each = toset(local.apis)
 
@@ -95,6 +99,18 @@ resource "google_service_account_iam_member" "ci_workload_identity" {
   service_account_id = google_service_account.ci.name
   role               = "roles/iam.workloadIdentityUser"
   member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.repository/${var.github_repository}"
+}
+
+# Cloud Run pulls images as its own service agent, not as the service's runtime
+# identity, so this is the grant that lets a deployment start at all.
+resource "google_artifact_registry_repository_iam_member" "run_agent_reader" {
+  for_each = google_artifact_registry_repository.app
+
+  project    = var.project
+  location   = each.value.location
+  repository = each.value.name
+  role       = "roles/artifactregistry.reader"
+  member     = "serviceAccount:service-${data.google_project.this.number}@serverless-robot-prod.iam.gserviceaccount.com"
 }
 
 resource "google_artifact_registry_repository_iam_member" "ci_writer" {
