@@ -1,4 +1,6 @@
 # Promotion surface for the frontend. CI writes the dev entry when a tag is
 # pushed; every entry above dev arrives by copying a digest down from the
 # environment before it. Empty until the first release.
-{}
+dev:
+  version: frontend-0.1.0
+  digest: sha256:5760722fa0c21831fe896588e050f8c3bf2987f34194fc40b7fdb2781e986953
