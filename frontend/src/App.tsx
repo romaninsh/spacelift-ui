@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { config } from './config'
+import { config, version as appVersion } from './config'
 
 type Version = { version: string; color: string }
 
@@ -78,6 +78,10 @@ export default function App() {
           />
         ))}
       </main>
+
+      <footer className="pointer-events-none fixed bottom-0 left-0 px-4 py-3 text-xs text-slate-600">
+        frontend {appVersion}
+      </footer>
     </div>
   )
 }

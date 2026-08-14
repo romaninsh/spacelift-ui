@@ -163,40 +163,49 @@ than a long-lived service account key.
 
 ## The applications
 
+Both applications follow the same rule, which the promotion model depends on: **identity is
+baked at build time, configuration is read at runtime.** One image must run unchanged in
+every environment, so it cannot learn its version from the environment, and it cannot learn
+its environment from the build.
+
 ### `api`
 
-Rust, axum. Two endpoints.
-
-`/healthz` returns 200 when the process is ready to serve, and a non-2xx otherwise, so
-Cloud Run's health checking is honest.
-
-`/version` returns the identity of the running instance:
+Rust, axum. `/healthz` returns `ok`. `/version` returns:
 
 ```json
-{
-  "app": "api",
-  "env": "stg",
-  "version": "api-1.2.3",
-  "digest": "sha256:abc…",
-  "revision": "api-stg-00042-abc",
-  "color": "green"
-}
+{ "version": "0.1.0", "color": "green" }
 ```
 
-Every field arrives as an environment variable, injected by the `infra/app` module from
-the stack's tfvars — which is what makes `color` a feature flag today and a Spacelift stack
-variable later, with no change to the application.
+`version` is `CARGO_PKG_VERSION`, compiled in. `color` is the runtime feature flag, read
+from `COLOR` and falling back to `gray` when unset or empty — so an unconfigured service is
+visibly unconfigured rather than plausibly green. `SERVICE_HOST` (default `127.0.0.1`) and
+`SERVICE_PORT` (default `8080`) control binding; Cloud Run needs `SERVICE_HOST=0.0.0.0`.
+
+CORS is permissive, because the frontend calls the api from a different origin.
 
 ### `frontend`
 
-Plain JavaScript, no build step. It polls the api's `/version` and spawns bubbles in the
-returned colour at a rate given by its own `spawn_speed` feature flag. This makes a
-green/blue switch-over directly visible: as Cloud Run shifts traffic between revisions, the
-bubble stream changes colour mid-flight, and the proportion of each colour is the traffic
-split.
+Vite, React, TypeScript, Tailwind. It polls the api's `/version` once a second and spawns
+bubbles in the returned colour at a runtime-configured rate. This makes a green/blue
+switch-over directly visible: as Cloud Run shifts traffic between revisions, the bubble
+stream changes colour mid-flight, and the proportion of each colour is the traffic split.
+When the api is unreachable the bubbles go grey, so a broken backend is visible rather than
+silent.
 
-When the api is unreachable the frontend degrades to grey bubbles rather than stopping, so
-a broken backend is visible rather than silent.
+Its own version is baked at build time through Vite's `define`, taken from `package.json`
+or overridden by `APP_VERSION` in CI, and shown in the bottom-left corner.
+
+Runtime configuration cannot use Vite's env vars, which are inlined at build time and would
+tie an image to one environment. It comes instead from `public/config.js`, loaded before the
+bundle and read via `window.__CONFIG__`:
+
+```js
+window.__CONFIG__ = { apiUrl: 'http://127.0.0.1:8080', spawnSpeed: 2 }
+```
+
+The container entrypoint regenerates that file from environment variables at startup. One
+artifact, per-environment configuration, and `spawnSpeed` is where the frontend feature flag
+lands.
 
 ## `appctl`
 
@@ -272,11 +281,14 @@ not currently installed, so the compose path requires `brew install docker-compo
 
 ## Testing
 
-The api gets unit tests over `/healthz` and `/version`, including that a missing
-environment variable produces a clearly wrong-looking value rather than a panic. CI runs
-`cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`, and `tofu fmt -check` plus
-`tofu validate` on every module and stack root. A smoke step builds both images and
-confirms each answers `/healthz`.
+The api has tests over `/healthz`, `/version`, and the grey fallback. The frontend has none
+by choice — it is a demonstration surface, and its correctness is visible on screen. CI runs
+`cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`, `tsc -b`, `oxlint`, and
+`tofu fmt -check` plus `tofu validate` on every module and stack root. A smoke step builds
+both images and confirms each answers `/healthz`.
+
+A `Makefile` at the root drives all of it: `install`, `build`, `test`, `lint`, `fmt`,
+`clean`, `api`, `frontend`, `dev`.
 
 ## Error handling
 

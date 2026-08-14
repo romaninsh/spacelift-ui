@@ -13,3 +13,5 @@ export const config: Config = {
   apiUrl: window.__CONFIG__?.apiUrl ?? 'http://127.0.0.1:8080',
   spawnSpeed: Number(window.__CONFIG__?.spawnSpeed) || 2,
 }
+
+export const version = __APP_VERSION__
