@@ -1,0 +1,33 @@
+# yaml-language-server: $schema=./page-schema-1.json
+title: Pull requests
+body:
+  - kind: grid
+    name: pull_requests
+    observe: pull_requests
+    params:
+      columns:
+        number:
+          label: "#"
+          width: 70
+        title:
+          label: Title
+          width: 380
+        state:
+          label: State
+          width: 100
+          color:
+            muted: [draft]
+            yellow: [review]
+          labels:
+            draft: Draft
+            review: In review
+        review:
+          label: Decision
+          width: 150
+        author:
+          label: Author
+          width: 130
+        apps:
+          label: Apps
+          width: 140
+      default_sort: { column: number, direction: desc }

@@ -1,0 +1,33 @@
+# yaml-language-server: $schema=./table-schema-1.json
+# One row per app per environment. `version`/`digest` are what the repository
+# says should be deployed; `running_*` is what Cloud Run reports back.
+datasource: appctl
+title: Deployments
+columns:
+  - { name: id, type: string, flags: [id] }
+  - { name: app, type: string, flags: [searchable] }
+  - { name: env, type: string, flags: [title] }
+  - { name: order, type: int }
+  - { name: version, type: string }
+  - { name: digest, type: string }
+  - { name: running_digest, type: string }
+  - { name: running_version, type: string }
+  - { name: color, type: string }
+  - { name: url, type: string }
+  - { name: revision, type: string }
+  - { name: ready, type: bool }
+  - { name: healthy, type: bool }
+  - { name: status, type: string }
+  - { name: drift, type: string }
+  - { name: next_env, type: string }
+  - { name: promotable, type: bool }
+cmd:
+  rhai: |
+    let args = ["deployments", "list"];
+    for c in conditions {
+        if c.field == "app" { args += ["--app", c.value]; }
+        if c.field == "env" { args += ["--env", c.value]; }
+    }
+    let out = run(args);
+    if out.exit_code != 0 { throw out.stderr; }
+    parse_json(out.stdout)

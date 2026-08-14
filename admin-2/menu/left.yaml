@@ -1,0 +1,6 @@
+# yaml-language-server: $schema=./menu-schema-1.json
+items:
+  - { page: deployments, label: Deployments }
+  - { page: apps, label: Apps }
+  - { page: environments, label: Environments }
+  - { page: pull-requests, label: Pull requests }

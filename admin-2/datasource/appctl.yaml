@@ -1,0 +1,11 @@
+# yaml-language-server: $schema=./datasource-schema-1.json
+# Every table here runs appctl, which reads apps.yaml and the deployments files
+# for desired state and asks Cloud Run for what is actually running.
+type: cmd
+description: "Deployment state via the appctl CLI"
+command: /Users/rw/Work/spacelift-ui/cli/appctl
+env:
+  APPCTL_REPO: /Users/rw/Work/spacelift-ui
+  # Vantage forwards the launchd PATH, which has no Homebrew on it — so yq,
+  # gcloud and gh are all missing, and python3 resolves to Xcode's 3.9.
+  PATH: /opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
