@@ -76,18 +76,11 @@ def deployments(root, app):
     return read_yaml(deployments_path(root, app)) or {}
 
 
-def component(inv, key):
-    for item in inv["components"]:
+def find(items, key, what):
+    for item in items:
         if item["key"] == key:
             return item
-    raise Failure(f"no component '{key}' in apps.yaml")
-
-
-def environment(inv, key):
-    for item in inv["environments"]:
-        if item["key"] == key:
-            return item
-    raise Failure(f"no environment '{key}' in apps.yaml")
+    raise Failure(f"no {what} '{key}' in apps.yaml")
 
 
 def services(inv):
@@ -108,7 +101,7 @@ def version_key(version):
 
 def describe(inv, app, env):
     """What Cloud Run says is running. None when the service does not exist."""
-    spec = component(inv, app)
+    spec = find(inv["components"], app, "component")
     name = spec["service"].replace("{env}", env)
     result = run(
         [
@@ -186,9 +179,7 @@ def deployment_rows(root, inv, only_app=None, only_env=None):
         return {
             "id": f"{app}/{key}",
             "app": app,
-            "app_title": spec["title"],
             "env": key,
-            "env_title": env["title"],
             "order": env["order"],
             "version": want.get("version"),
             "digest": want.get("digest"),
@@ -201,7 +192,6 @@ def deployment_rows(root, inv, only_app=None, only_env=None):
             "healthy": healthy,
             "status": status,
             "next_env": env.get("promotes_to"),
-            "approval": env.get("approval", False),
         }
 
     pairs = [(spec, env) for spec in wanted for env in envs]
@@ -210,28 +200,24 @@ def deployment_rows(root, inv, only_app=None, only_env=None):
 
     # Freshness is relative to the newest version this app has anywhere, and
     # promotability is decided here so callers never re-derive the rule.
-    for spec in wanted:
-        mine = [r for r in rows if r["app"] == spec["key"]]
-        newest = max((version_key(r["version"]) for r in mine if r["version"]), default=None)
-        for row in mine:
-            if not row["version"]:
-                row["drift"] = "absent"
-            elif newest and version_key(row["version"]) == newest:
-                row["drift"] = "current"
-            else:
-                row["drift"] = "behind"
+    by_app = {}
+    for row in rows:
+        by_app.setdefault(row["app"], []).append(row)
 
-            target = next(
-                (r for r in mine if r["env"] == row["next_env"]), None
-            ) if row["next_env"] else None
-            row["promotable"] = bool(
+    for mine in by_app.values():
+        newest = max((version_key(r["version"]) for r in mine if r["version"]), default=None)
+        by_env = {r["env"]: r for r in mine}
+        for row in mine:
+            row["drift"] = (
+                "absent" if not row["version"]
+                else "current" if version_key(row["version"]) == newest
+                else "behind"
+            )
+            target = by_env.get(row["next_env"])
+            row["promotable"] = (
                 row["status"] == "healthy"
                 and target is not None
-                and target.get("digest") != row["digest"]
-            )
-            row["promote_label"] = (
-                f"Promote {row['app']} {row['version']} to {row['next_env']}"
-                if row["promotable"] else ""
+                and target["digest"] != row["digest"]
             )
 
     rows.sort(key=lambda r: (r["app"], r["order"]))
@@ -242,17 +228,11 @@ def deployment_rows(root, inv, only_app=None, only_env=None):
 
 
 def cmd_apps(args, root, inv):
+    # Columns the table doesn't declare are ignored, so pass the component
+    # through and only flatten the one field that isn't a scalar.
     return [
-        {
-            "key": c["key"],
-            "title": c["title"],
-            "kind": c["kind"],
-            "path": c["path"],
-            "stack": c["stack"],
-            "tag_prefix": c["tag_prefix"],
-            "image": c.get("image"),
-            "features": ", ".join(f["variable"] for f in c.get("features") or []),
-        }
+        {**c, "image": c.get("image"),
+         "features": ", ".join(f["variable"] for f in c.get("features") or [])}
         for c in inv["components"]
     ]
 
@@ -296,8 +276,8 @@ def cmd_prs(args, root, inv):
 
 
 def cmd_promote(args, root, inv):
-    source = environment(inv, args.source)
-    environment(inv, args.target)
+    source = find(inv["environments"], args.source, "environment")
+    find(inv["environments"], args.target, "environment")
 
     # One rung at a time: the ladder is the point.
     if source.get("promotes_to") != args.target:
@@ -356,17 +336,19 @@ def main():
     parser = argparse.ArgumentParser(prog="appctl", description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="group", required=True)
 
-    for group, handler, adder in [
-        ("apps", cmd_apps, None),
-        ("envs", cmd_envs, None),
-        ("deployments", cmd_deployments, lambda p: (
-            p.add_argument("--app"), p.add_argument("--env"))),
-        ("prs", cmd_prs, lambda p: p.add_argument("--app")),
+    for group, handler, flags in [
+        ("apps", cmd_apps, []),
+        ("envs", cmd_envs, []),
+        ("deployments", cmd_deployments, ["--app", "--env"]),
+        ("prs", cmd_prs, ["--app"]),
     ]:
-        group_parser = sub.add_parser(group).add_subparsers(dest="action", required=True)
-        listing = group_parser.add_parser("list")
-        if adder:
-            adder(listing)
+        listing = (
+            sub.add_parser(group)
+            .add_subparsers(dest="action", required=True)
+            .add_parser("list")
+        )
+        for flag in flags:
+            listing.add_argument(flag)
         listing.set_defaults(handler=handler)
 
     promote = sub.add_parser("promote", help="copy a digest to the next environment")

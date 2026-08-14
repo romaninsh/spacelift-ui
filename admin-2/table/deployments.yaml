@@ -6,9 +6,7 @@ title: Deployments
 columns:
   - { name: id, type: string, flags: [id] }
   - { name: app, type: string, flags: [searchable] }
-  - { name: app_title, type: string }
   - { name: env, type: string, flags: [title] }
-  - { name: env_title, type: string }
   - { name: order, type: int }
   - { name: version, type: string }
   - { name: digest, type: string }
@@ -22,9 +20,7 @@ columns:
   - { name: status, type: string }
   - { name: drift, type: string }
   - { name: next_env, type: string }
-  - { name: approval, type: bool }
   - { name: promotable, type: bool }
-  - { name: promote_label, type: string }
 cmd:
   rhai: |
     let args = ["deployments", "list"];
