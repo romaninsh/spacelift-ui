@@ -88,6 +88,18 @@ resource "google_project_iam_member" "app_run_admin" {
   member  = "serviceAccount:${each.value.service_account_email}"
 }
 
+# Cloud Run refuses to create a service unless the identity deploying it can
+# itself read the image, so run.admin alone is not enough.
+resource "google_artifact_registry_repository_iam_member" "stack_reader" {
+  for_each = spacelift_stack_gcp_service_account.app
+
+  project    = var.project
+  location   = var.region
+  repository = google_artifact_registry_repository.app[each.key].name
+  role       = "roles/artifactregistry.reader"
+  member     = "serviceAccount:${each.value.service_account_email}"
+}
+
 # Deploying a service that runs as a service account requires acting as it.
 resource "google_project_iam_member" "app_service_account_user" {
   for_each = spacelift_stack_gcp_service_account.app
