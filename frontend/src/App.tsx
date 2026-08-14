@@ -1,14 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { config, version as appVersion } from './config'
 
-type Version = { version: string; color: string }
+type Version = { version: string; env: string; color: string }
 
 type Bubble = { id: number; left: number; size: number; duration: number; color: string }
 
-const unreachable: Version = { version: 'unreachable', color: 'gray' }
+const unreachable: Version = { version: 'unreachable', env: '—', color: 'gray' }
 
 export default function App() {
-  const [version, setVersion] = useState<Version>({ version: '…', color: 'gray' })
+  const [version, setVersion] = useState<Version>({ version: '…', env: '…', color: 'gray' })
   const [bubbles, setBubbles] = useState<Bubble[]>([])
   const nextId = useRef(0)
 
@@ -55,8 +55,9 @@ export default function App() {
           className="size-3 rounded-full ring-2 ring-slate-700"
           style={{ background: version.color }}
         />
-        <span className="font-semibold">{version.version}</span>
-        <span className="text-slate-500">{version.color}</span>
+        <span className="font-semibold uppercase tracking-wide">{version.env}</span>
+        <span className="text-slate-400">api {version.version}</span>
+        <span className="text-slate-600">{version.color}</span>
         <span className="ml-auto text-slate-600">{config.spawnSpeed}/s</span>
       </header>
 
@@ -80,7 +81,7 @@ export default function App() {
       </main>
 
       <footer className="pointer-events-none fixed bottom-0 left-0 px-4 py-3 text-xs text-slate-600">
-        frontend {appVersion}
+        frontend {appVersion} · {config.env}
       </footer>
     </div>
   )

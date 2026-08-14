@@ -1,8 +1,8 @@
 API_PORT ?= 8080
 FRONTEND_PORT ?= 8081
-COLOR ?= green
+APP_COLOR ?= green
 
-.PHONY: install build test lint fmt clean api frontend dev
+.PHONY: install build test lint fmt clean api frontend dev up down
 
 install:
 	cd frontend && npm install
@@ -26,7 +26,7 @@ clean:
 	rm -rf frontend/dist frontend/node_modules
 
 api:
-	cd api && COLOR=$(COLOR) SERVICE_PORT=$(API_PORT) cargo run
+	cd api && APP_COLOR=$(APP_COLOR) SERVICE_PORT=$(API_PORT) cargo run
 
 frontend:
 	cd frontend && npm run dev -- --port $(FRONTEND_PORT)
@@ -36,3 +36,9 @@ dev:
 	$(MAKE) api & \
 	$(MAKE) frontend & \
 	wait
+
+up:
+	docker compose up --build
+
+down:
+	docker compose down

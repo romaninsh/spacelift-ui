@@ -1,0 +1,17 @@
+server {
+    listen ${SERVICE_PORT};
+    root /usr/share/nginx/html;
+
+    location = /healthz {
+        add_header Content-Type text/plain;
+        return 200 'ok';
+    }
+
+    location = /config.js {
+        add_header Cache-Control 'no-store';
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}

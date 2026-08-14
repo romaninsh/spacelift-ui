@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3:*)",
+      "Bash(sqlite3:*)",
+      "Bash(psql:*)",
+      "Bash(mysql:*)",
+      "Bash(mongosh:*)",
+      "Bash(surreal:*)",
+      "Bash(aws:*)",
+      "Bash(kubectl:*)",
+      "Bash(curl:*)",
+      "mcp__vantage-ui__list_logs",
+      "mcp__vantage-ui__list_models",
+      "mcp__vantage-ui__run_data_script",
+      "mcp__vantage-ui__ui_tree",
+      "mcp__vantage-ui__ui_interact",
+      "mcp__vantage-ui__perf_stats"
+    ]
+  },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "vantage-ui"
+  ]
+}

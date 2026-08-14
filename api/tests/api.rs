@@ -5,7 +5,7 @@ use http_body_util::BodyExt;
 use tower::ServiceExt;
 
 async fn get(path: &str) -> (StatusCode, String) {
-    let response = app(Version::new("green"))
+    let response = app(Version::new("local", "green"))
         .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
         .await
         .unwrap();
@@ -16,15 +16,16 @@ async fn get(path: &str) -> (StatusCode, String) {
 
 #[test]
 fn version_reports_the_crate_version_and_the_given_colour() {
-    let version = Version::new("blue");
+    let version = Version::new("local", "blue");
 
     assert_eq!(version.version, env!("CARGO_PKG_VERSION"));
     assert_eq!(version.color, "blue");
 }
 
 #[test]
-fn version_falls_back_to_gray_when_no_colour_is_configured() {
-    assert_eq!(Version::new("").color, "gray");
+fn version_falls_back_to_local_and_gray_when_nothing_is_configured() {
+    assert_eq!(Version::new("", "").color, "gray");
+    assert_eq!(Version::new("", "").env, "local");
 }
 
 #[tokio::test]
@@ -42,6 +43,6 @@ async fn version_endpoint_returns_json() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
         serde_json::from_str::<serde_json::Value>(&body).unwrap(),
-        serde_json::json!({ "version": env!("CARGO_PKG_VERSION"), "color": "green" })
+        serde_json::json!({ "version": env!("CARGO_PKG_VERSION"), "env": "local", "color": "green" })
     );
 }

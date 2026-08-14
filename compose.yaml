@@ -1,0 +1,23 @@
+services:
+  api:
+    build: ./api
+    environment:
+      SERVICE_HOST: '0.0.0.0'
+      SERVICE_PORT: '8080'
+      APP_ENV: 'docker'
+      APP_COLOR: 'green'
+    ports:
+      - '8080:8080'
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        APP_VERSION: ${APP_VERSION:-}
+    environment:
+      SERVICE_PORT: '8080'
+      APP_ENV: 'docker'
+      APP_API_URL: 'http://127.0.0.1:8080'
+      APP_SPAWN_SPEED: '2'
+    ports:
+      - '8081:8080'
