@@ -1,15 +1,30 @@
 name: release
 
-# A tag names the component and its version: api-0.1.0, frontend-0.4.1.
+# Releases are driven by the manifest, not by a hand-made tag: land a version
+# change on main and that component ships. Several can change in one push, and
+# each is released independently.
 on:
   push:
-    tags:
-      - 'api-*'
-      - 'frontend-*'
+    branches: [main]
+  # Escape hatch: release a component at whatever version main already
+  # declares, for when the version landed before this workflow existed or a
+  # run failed after the merge.
+  workflow_dispatch:
+    inputs:
+      component:
+        description: Component to release
+        required: true
+        type: choice
+        options: [api, frontend]
 
 permissions:
   contents: write
   id-token: write
+
+# Each release commits back to main, so two overlapping runs would fight.
+concurrency:
+  group: release-main
+  cancel-in-progress: false
 
 env:
   REGISTRY: europe-west2-docker.pkg.dev
@@ -19,45 +34,70 @@ env:
   SERVICE_ACCOUNT: github-actions@inlaid-agility-461020-e4.iam.gserviceaccount.com
 
 jobs:
-  build:
+  detect:
     runs-on: ubuntu-latest
     outputs:
-      component: ${{ steps.tag.outputs.component }}
-      version: ${{ steps.tag.outputs.version }}
-      digest: ${{ steps.build.outputs.digest }}
+      releases: ${{ steps.changed.outputs.releases }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Parse the tag
-        id: tag
+      - name: Which components changed version
+        id: changed
         env:
-          TAG: ${{ github.ref_name }}
+          BEFORE: ${{ github.event.before }}
+          FORCED: ${{ inputs.component }}
         run: |
-          if [[ ! "$TAG" =~ ^(api|frontend)-([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
-            echo "::error::tag '$TAG' must be <component>-<major>.<minor>.<patch>"
-            exit 1
-          fi
-          echo "component=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
-          echo "version=${BASH_REMATCH[2]}" >> "$GITHUB_OUTPUT"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
 
-      # Both services report a version compiled into the artifact, so a tag that
-      # disagrees with the manifest would ship a build claiming to be something
-      # that was never released.
-      - name: Tag must match the manifest
-        env:
-          COMPONENT: ${{ steps.tag.outputs.component }}
-          VERSION: ${{ steps.tag.outputs.version }}
-        run: |
-          if [ "$COMPONENT" = "api" ]; then
-            declared=$(sed -n 's/^version = "\(.*\)"/\1/p' api/Cargo.toml | head -1)
-          else
-            declared=$(node -p "require('./frontend/package.json').version")
+          api_version() { sed -n 's/^version = "\(.*\)"/\1/p' | head -1; }
+          frontend_version() { node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version"; }
+
+          manifest() {
+            case "$1" in
+              api)      echo "api/Cargo.toml api_version" ;;
+              frontend) echo "frontend/package.json frontend_version" ;;
+            esac
+          }
+
+          before="$BEFORE"
+          if [ -z "$before" ] || ! git cat-file -e "$before" 2>/dev/null; then
+            before=$(git rev-parse HEAD~1)
           fi
-          if [ "$declared" != "$VERSION" ]; then
-            echo "::error::tag says $VERSION but $COMPONENT declares $declared"
-            exit 1
-          fi
+
+          releases='[]'
+          for component in ${FORCED:-api frontend}; do
+            read -r path extract <<<"$(manifest "$component")"
+            now=$("$extract" < "$path")
+
+            if [ -n "$FORCED" ]; then
+              echo "$component: forced release of $now"
+            else
+              was=$(git show "$before:$path" 2>/dev/null | "$extract" || true)
+              [ "$now" = "$was" ] && continue
+              echo "$component: $was -> $now"
+            fi
+
+            releases=$(echo "$releases" | jq -c --arg c "$component" --arg v "$now" '. + [{component:$c,version:$v}]')
+          done
+
+          echo "releases=$releases" >> "$GITHUB_OUTPUT"
+          echo "$releases"
+
+  release:
+    needs: detect
+    if: needs.detect.outputs.releases != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      # Each job commits to main; serialise so they never race.
+      max-parallel: 1
+      matrix:
+        include: ${{ fromJson(needs.detect.outputs.releases) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: google-github-actions/auth@v2
         id: auth
@@ -77,26 +117,32 @@ jobs:
       - uses: docker/build-push-action@v6
         id: build
         with:
-          context: ${{ steps.tag.outputs.component }}
+          context: ${{ matrix.component }}
           push: true
           provenance: false
           build-args: |
-            APP_VERSION=${{ steps.tag.outputs.tag }}
+            APP_VERSION=${{ matrix.component }}-${{ matrix.version }}
           tags: |
-            ${{ env.REGISTRY }}/${{ env.PROJECT }}/${{ steps.tag.outputs.component }}/${{ steps.tag.outputs.component }}:${{ steps.tag.outputs.version }}
-            ${{ env.REGISTRY }}/${{ env.PROJECT }}/${{ steps.tag.outputs.component }}/${{ steps.tag.outputs.component }}:sha-${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.PROJECT }}/${{ matrix.component }}/${{ matrix.component }}:${{ matrix.version }}
+            ${{ env.REGISTRY }}/${{ env.PROJECT }}/${{ matrix.component }}/${{ matrix.component }}:sha-${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # Dev is always the newest build, with no human in the loop. Every environment
-  # above it receives this same digest by explicit promotion.
-  promote-dev:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: main
+      # Only once the artifact is really in the registry — the tag marks the
+      # commit an image exists for, so it must not run ahead of the push.
+      - name: Tag the released commit
+        env:
+          TAG: ${{ matrix.component }}-${{ matrix.version }}
+        run: |
+          set -euo pipefail
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "$TAG already exists"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "$TAG" "${{ github.sha }}"
+          git push origin "$TAG"
 
       - name: Install yq
         run: |
@@ -104,17 +150,24 @@ jobs:
             https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64
           sudo chmod +x /usr/local/bin/yq
 
+      # Dev is always the newest build, with no human in the loop. Every
+      # environment above it receives this same digest by explicit promotion.
       - name: Pin the digest for dev
         env:
-          COMPONENT: ${{ needs.build.outputs.component }}
-          TAG: ${{ github.ref_name }}
-          DIGEST: ${{ needs.build.outputs.digest }}
+          COMPONENT: ${{ matrix.component }}
+          TAG: ${{ matrix.component }}-${{ matrix.version }}
+          DIGEST: ${{ steps.build.outputs.digest }}
         run: |
+          set -euo pipefail
           test -n "$DIGEST"
-          yq -i ".dev.version = \"$TAG\" | .dev.digest = \"$DIGEST\"" \
-            "infra/app/deployments/${COMPONENT}.yaml"
-          git diff --exit-code && echo "no change" && exit 0 || true
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          yq -i ".dev.version = \"$TAG\" | .dev.digest = \"$DIGEST\"" \
+            "infra/app/deployments/${COMPONENT}.yaml"
+          if git diff --quiet; then
+            echo "dev already pinned to $DIGEST"
+            exit 0
+          fi
           git commit -am "$COMPONENT: deploy $TAG to dev"
-          git push origin main
+          git pull --rebase origin main
+          git push origin HEAD:main

@@ -6,6 +6,43 @@ on:
     branches: [main]
 
 jobs:
+  # Releases are driven by the manifest version, so changing a component
+  # without bumping it means the merge ships nothing — silently.
+  version-bump:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Touched components must declare a new version
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          api_version() { sed -n 's/^version = "\(.*\)"/\1/p' | head -1; }
+          frontend_version() { node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version"; }
+
+          failed=0
+          for component in api frontend; do
+            case "$component" in
+              api)      path=api/Cargo.toml;        extract=api_version ;;
+              frontend) path=frontend/package.json; extract=frontend_version ;;
+            esac
+
+            git diff --quiet "$BASE"...HEAD -- "$component" && continue
+
+            now=$("$extract" < "$path")
+            was=$(git show "$BASE:$path" | "$extract")
+            if [ "$now" = "$was" ]; then
+              echo "::error file=$path::$component changed but still declares $now — bump it or the merge ships nothing"
+              failed=1
+            else
+              echo "$component: $was -> $now"
+            fi
+          done
+          exit $failed
+
   api:
     runs-on: ubuntu-latest
     defaults:
