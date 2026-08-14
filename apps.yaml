@@ -1,0 +1,67 @@
+# Inventory of what exists. Deliberately carries no versions: the desired
+# version of a component lives in infra/stacks/<component>/deploy.auto.tfvars,
+# and the running version is read back from Cloud Run.
+
+project: inlaid-agility-461020-e4
+region: europe-west2
+registry: europe-west2-docker.pkg.dev/inlaid-agility-461020-e4/apps
+
+components:
+  - key: base
+    title: Base
+    kind: infra
+    path: infra/base
+    stack: base
+    tag_prefix: base-
+
+  - key: api
+    title: API
+    kind: service
+    path: api
+    stack: api
+    tag_prefix: api-
+    image: api
+    service: api-{env}
+    port: 8080
+    features:
+      - key: color
+        title: Bubble colour
+        variable: APP_COLOR
+        default: green
+
+  - key: frontend
+    title: Frontend
+    kind: service
+    path: frontend
+    stack: frontend
+    tag_prefix: frontend-
+    image: frontend
+    service: frontend-{env}
+    port: 8080
+    features:
+      - key: spawn_speed
+        title: Bubble spawn rate
+        variable: APP_SPAWN_SPEED
+        default: '2'
+
+environments:
+  - key: dev
+    title: Development
+    order: 1
+    promotes_to: uat
+    approval: false
+  - key: uat
+    title: User acceptance
+    order: 2
+    promotes_to: stg
+    approval: false
+  - key: stg
+    title: Staging
+    order: 3
+    promotes_to: prd
+    approval: false
+  - key: prd
+    title: Production
+    order: 4
+    promotes_to: null
+    approval: true
