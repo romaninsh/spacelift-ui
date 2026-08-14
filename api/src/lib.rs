@@ -1,5 +1,6 @@
 use axum::{Json, Router, extract::State, routing::get};
 use serde::Serialize;
+use tower_http::cors::CorsLayer;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Version {
@@ -29,6 +30,7 @@ pub fn app(version: Version) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
         .route("/version", get(self::version))
+        .layer(CorsLayer::permissive())
         .with_state(version)
 }
 

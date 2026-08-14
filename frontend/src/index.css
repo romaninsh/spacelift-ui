@@ -1,0 +1,19 @@
+@import 'tailwindcss';
+
+@keyframes rise {
+  from {
+    transform: translateY(0) scale(0.9);
+    opacity: 0;
+  }
+  10% {
+    opacity: 0.85;
+  }
+  to {
+    transform: translateY(-100vh) scale(1.1);
+    opacity: 0;
+  }
+}
+
+.bubble {
+  animation: rise linear forwards;
+}
