@@ -68,12 +68,53 @@ def inventory(root):
     return read_yaml(root / "apps.yaml")
 
 
-def deployments_path(root, app):
-    return root / "infra" / "app" / "deployments" / f"{app}.yaml"
+# --- Spacelift ---------------------------------------------------------------
+
+DEPLOY_PREFIX = "TF_VAR_deploy_"
 
 
-def deployments(root, app):
-    return read_yaml(deployments_path(root, app)) or {}
+def load_credentials(root):
+    """spacectl reads SPACELIFT_API_KEY_*; fall back to the untracked env file
+    so the dashboard can run this without secrets in its own config."""
+    if os.environ.get("SPACELIFT_API_KEY_ID"):
+        return
+    path = root / ".secret" / "spacelift.env"
+    if not path.is_file():
+        raise Failure(f"no Spacelift credentials: set SPACELIFT_API_KEY_* or add {path}")
+    for line in path.read_text().splitlines():
+        line = line.strip().removeprefix("export ")
+        if line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        os.environ.setdefault(key.strip(), value.strip().strip("\"'"))
+
+
+def graphql(query):
+    body = json.loads(run(["spacectl", "api", query]).stdout)
+    if body.get("errors"):
+        raise Failure("; ".join(e.get("message", "?") for e in body["errors"]))
+    return body["data"]
+
+
+def deployments(app):
+    """What each environment is pinned to, held as one stack variable per
+    environment rather than in the repository."""
+    stack = graphql('{ stack(id:"%s") { config { id value } } }' % app)["stack"]
+    if stack is None:
+        raise Failure(f"no Spacelift stack '{app}'")
+    return {
+        item["id"].removeprefix(DEPLOY_PREFIX): json.loads(item["value"])
+        for item in stack["config"]
+        if item["id"].startswith(DEPLOY_PREFIX) and item["value"]
+    }
+
+
+def set_deployment(app, env, document):
+    run([
+        "spacectl", "stack", "environment", "setvar",
+        "--id", app, f"{DEPLOY_PREFIX}{env}", json.dumps(document, sort_keys=True),
+    ])
+    run(["spacectl", "stack", "deploy", "--id", app])
 
 
 def find(items, key, what):
@@ -154,7 +195,7 @@ def probe(url, path):
 def deployment_rows(root, inv, only_app=None, only_env=None):
     wanted = [c for c in services(inv) if only_app in (None, c["key"])]
     envs = [e for e in inv["environments"] if only_env in (None, e["key"])]
-    desired = {c["key"]: deployments(root, c["key"]) for c in wanted}
+    desired = {c["key"]: deployments(c["key"]) for c in wanted}
 
     def build(pair):
         spec, env = pair
@@ -304,11 +345,15 @@ def cmd_promote(args, root, inv):
             "reason": f"{args.target} already runs {from_row['version']}",
         }
 
-    path = deployments_path(root, args.app)
-    expression = (
-        f'.{args.target}.version = "{from_row["version"]}" | '
-        f'.{args.target}.digest = "{from_row["digest"]}"'
-    )
+    # The artifact moves; the target keeps its own feature flags, which are
+    # environment configuration rather than part of what was built.
+    current = deployments(args.app)
+    document = {
+        **current.get(args.target, {}),
+        "version": from_row["version"],
+        "digest": from_row["digest"],
+    }
+
     result = {
         "promoted": not args.dry_run,
         "app": args.app,
@@ -317,18 +362,75 @@ def cmd_promote(args, root, inv):
         "version": from_row["version"],
         "digest": from_row["digest"],
         "replaced": to_row["version"],
-        "file": str(path.relative_to(root)),
+        "variable": f"{DEPLOY_PREFIX}{args.target}",
     }
     if args.dry_run:
-        result["expression"] = expression
+        result["document"] = document
         return result
 
-    run(["yq", "-i", expression, str(path)])
-    message = f"{args.app}: promote {from_row['version']} to {args.target}"
-    run(["git", "add", str(path)], cwd=str(root))
-    run(["git", "commit", "-m", message], cwd=str(root))
-    run(["git", "push", "origin", "HEAD"], cwd=str(root))
-    result["commit"] = run(["git", "rev-parse", "--short", "HEAD"], cwd=str(root)).stdout.strip()
+    set_deployment(args.app, args.target, document)
+    return result
+
+
+def cmd_features(args, root, inv):
+    rows = []
+    for spec in services(inv):
+        if args.app not in (None, spec["key"]):
+            continue
+        pinned = deployments(spec["key"])
+        for env in inv["environments"]:
+            if args.env not in (None, env["key"]):
+                continue
+            overrides = (pinned.get(env["key"]) or {}).get("features") or {}
+            for feature in spec.get("features") or []:
+                override = overrides.get(feature["variable"])
+                rows.append({
+                    "id": f"{spec['key']}/{env['key']}/{feature['key']}",
+                    "app": spec["key"],
+                    "env": env["key"],
+                    "order": env["order"],
+                    "key": feature["key"],
+                    "title": feature["title"],
+                    "variable": feature["variable"],
+                    "value": override if override is not None else feature["default"],
+                    "source": "override" if override is not None else "default",
+                    "deployed": env["key"] in pinned,
+                })
+    rows.sort(key=lambda r: (r["app"], r["order"], r["key"]))
+    return rows
+
+
+def cmd_feature_set(args, root, inv):
+    spec = find(inv["components"], args.app, "component")
+    feature = find(spec.get("features") or [], args.key, f"feature on {args.app}")
+    find(inv["environments"], args.env, "environment")
+
+    pinned = deployments(args.app)
+    if args.env not in pinned:
+        raise Failure(
+            f"{args.app} has nothing deployed in {args.env} — "
+            f"setting a flag there would describe a service that does not exist"
+        )
+
+    document = {**pinned[args.env]}
+    features = {**(document.get("features") or {})}
+    if args.clear:
+        features.pop(feature["variable"], None)
+    else:
+        features[feature["variable"]] = args.value
+    document["features"] = features
+
+    result = {
+        "app": args.app,
+        "env": args.env,
+        "key": args.key,
+        "variable": feature["variable"],
+        "value": None if args.clear else args.value,
+        "effective": features.get(feature["variable"], feature["default"]),
+        "applied": not args.dry_run,
+    }
+    if not args.dry_run:
+        set_deployment(args.app, args.env, document)
     return result
 
 
@@ -341,6 +443,7 @@ def main():
         ("envs", cmd_envs, []),
         ("deployments", cmd_deployments, ["--app", "--env"]),
         ("prs", cmd_prs, ["--app"]),
+        ("features", cmd_features, ["--app", "--env"]),
     ]:
         listing = (
             sub.add_parser(group)
@@ -359,10 +462,22 @@ def main():
     promote.add_argument("--force", action="store_true", help="promote an unhealthy source")
     promote.set_defaults(handler=cmd_promote)
 
+    feature = sub.add_parser("feature", help="set or clear a feature flag").add_subparsers(
+        dest="action", required=True
+    ).add_parser("set")
+    feature.add_argument("--app", required=True)
+    feature.add_argument("--env", required=True)
+    feature.add_argument("--key", required=True)
+    feature.add_argument("--value")
+    feature.add_argument("--clear", action="store_true", help="revert to the declared default")
+    feature.add_argument("--dry-run", action="store_true")
+    feature.set_defaults(handler=cmd_feature_set)
+
     args = parser.parse_args()
     ensure_path()
     try:
         root = repo_root()
+        load_credentials(root)
         print(json.dumps(args.handler(args, root, inventory(root)), indent=2))
     except Failure as failure:
         print(str(failure), file=sys.stderr)

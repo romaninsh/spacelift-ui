@@ -40,4 +40,21 @@ main, a `release` pipeline will take versions, build and push artifacts, then wi
 ## Caching
 
 I have included docker caching, both dependency caches and i'm also restoring caches from artifact
-registry. When builds become complex, this saves signifant amount of time.
+registry. When builds become complex, this saves signifant amount of time, makes engineering teams
+happy.
+
+## Safety
+
+You would want to enable peer reviews and with enforced version bumps you can also loop in validation
+for PR titles, merge squishes - whichever your organisation prefers.
+
+Once code is changed - it's considered source of truth and will be promoted or rolled back or
+superseeded by next release.
+
+## Permissions
+
+Spacelift has stacks for all envs*apps combination. If your organisation has hundreds of apps,
+and 4-5 envs, managing this all is diffcult, so we introduce simple rule - you can only
+push app version if it's used in lower environmen and that enviromnent is healthy.
+
+Both app versions and feature flag values are stored in spacelift.
