@@ -1,0 +1,4 @@
+# Promotion surface for the frontend. CI writes the dev entry when a tag is
+# pushed; every entry above dev arrives by copying a digest down from the
+# environment before it. Empty until the first release.
+{}

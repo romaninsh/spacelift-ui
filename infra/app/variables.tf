@@ -1,5 +1,12 @@
+# This root is shared by every service stack. Which service it deploys comes
+# from the stack, as TF_VAR_component.
+variable "component" {
+  description = "Service component key, e.g. api. Selects deployments/<component>.yaml."
+  type        = string
+}
+
 variable "project" {
-  description = "GCP project hosting the service."
+  description = "GCP project hosting the services."
   type        = string
 }
 
@@ -8,46 +15,21 @@ variable "region" {
   type        = string
 }
 
-variable "component" {
-  description = "Component key from apps.yaml, e.g. api."
+variable "registry" {
+  description = "Base image path. Supplied by the base stack."
   type        = string
 }
 
-variable "environment" {
-  description = "Environment key, e.g. stg."
-  type        = string
-}
-
-variable "image" {
-  description = "Digest-pinned image. Promoting a tag would let the resolved artifact drift between environments."
-  type        = string
-
-  validation {
-    condition     = can(regex("@sha256:[0-9a-f]{64}$", var.image))
-    error_message = "Image must be pinned by digest, e.g. europe-west2-docker.pkg.dev/p/apps/api@sha256:<64 hex>."
-  }
-}
-
-variable "version_label" {
-  description = "Human-readable version of the pinned digest, e.g. api-1.2.3. Recorded as a label only."
-  type        = string
-}
-
-variable "service_account_email" {
-  description = "Runtime identity for the service."
-  type        = string
+variable "api_urls" {
+  description = "Api URL per environment, supplied by the api stack. Empty for the api itself."
+  type        = map(string)
+  default     = {}
 }
 
 variable "port" {
   description = "Port the container listens on."
   type        = number
   default     = 8080
-}
-
-variable "env_vars" {
-  description = "Runtime configuration, including APP_* feature flags."
-  type        = map(string)
-  default     = {}
 }
 
 variable "max_instances" {

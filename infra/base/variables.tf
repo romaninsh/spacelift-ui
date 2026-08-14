@@ -15,12 +15,12 @@ variable "repository" {
 }
 
 variable "environments" {
-  description = "Environment keys, each getting its own runtime service account."
+  description = "Environment keys, in promotion order."
   type        = list(string)
 }
 
 variable "services" {
-  description = "Service component keys from apps.yaml."
+  description = "Service component keys, one Spacelift stack each."
   type        = list(string)
 }
 

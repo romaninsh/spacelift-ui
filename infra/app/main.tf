@@ -1,18 +1,21 @@
 locals {
-  name = "${var.component}-${var.environment}"
+  # The promotion surface. One entry per environment this component is deployed
+  # to; an environment absent from the file has no service.
+  deployments = yamldecode(file("${path.module}/deployments/${var.component}.yaml"))
 
-  # Platform wiring the module owns, so a stack root cannot forget it. Both
+  # Platform wiring this root owns, so a deployments file cannot forget it. Both
   # applications bind loopback by default, which inside Cloud Run means no
   # traffic ever arrives and the health check fails.
   wiring = {
     SERVICE_HOST = "0.0.0.0"
     SERVICE_PORT = tostring(var.port)
-    APP_ENV      = var.environment
   }
 }
 
 resource "google_cloud_run_v2_service" "this" {
-  name                = local.name
+  for_each = local.deployments
+
+  name                = "${var.component}-${each.key}"
   project             = var.project
   location            = var.region
   ingress             = "INGRESS_TRAFFIC_ALL"
@@ -20,12 +23,14 @@ resource "google_cloud_run_v2_service" "this" {
 
   labels = {
     component   = var.component
-    environment = var.environment
-    version     = replace(var.version_label, ".", "-")
+    environment = each.key
+    version     = replace(each.value.version, ".", "-")
   }
 
   template {
-    service_account = var.service_account_email
+    # Naming matches the accounts the base stack creates, so the two stay in
+    # step without passing a map between stacks.
+    service_account = "run-${var.component}-${each.key}@${var.project}.iam.gserviceaccount.com"
 
     scaling {
       min_instance_count = 0
@@ -33,14 +38,20 @@ resource "google_cloud_run_v2_service" "this" {
     }
 
     containers {
-      image = var.image
+      image = "${var.registry}/${var.component}@${each.value.digest}"
 
       ports {
         container_port = var.port
       }
 
       dynamic "env" {
-        for_each = merge(local.wiring, var.env_vars)
+        for_each = merge(
+          local.wiring,
+          { APP_ENV = each.key },
+          try(lookup(each.value, "features", {}), {}),
+          # Only the frontend receives this; the api stack supplies no urls.
+          try({ APP_API_URL = var.api_urls[each.key] }, {}),
+        )
 
         content {
           name  = env.key
@@ -65,12 +76,23 @@ resource "google_cloud_run_v2_service" "this" {
       }
     }
   }
+
+  lifecycle {
+    precondition {
+      # Promoting a tag would let the resolved artifact drift between
+      # environments. Only a digest promotes the thing that was tested.
+      condition     = can(regex("^sha256:[0-9a-f]{64}$", each.value.digest))
+      error_message = "${var.component}/${each.key}: digest must be sha256:<64 hex>, got ${each.value.digest}."
+    }
+  }
 }
 
 resource "google_cloud_run_v2_service_iam_member" "public" {
-  project  = google_cloud_run_v2_service.this.project
-  location = google_cloud_run_v2_service.this.location
-  name     = google_cloud_run_v2_service.this.name
+  for_each = google_cloud_run_v2_service.this
+
+  project  = each.value.project
+  location = each.value.location
+  name     = each.value.name
   role     = "roles/run.invoker"
   member   = "allUsers"
 }

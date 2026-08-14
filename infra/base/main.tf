@@ -8,6 +8,8 @@ locals {
     "sts.googleapis.com",
   ]
 
+  registry = "${var.region}-docker.pkg.dev/${var.project}/${var.repository}"
+
   runtime_accounts = {
     for pair in setproduct(var.services, var.environments) :
     "${pair[0]}-${pair[1]}" => { component = pair[0], environment = pair[1] }
@@ -17,9 +19,8 @@ locals {
 resource "google_project_service" "this" {
   for_each = toset(local.apis)
 
-  project = var.project
-  service = each.value
-
+  project            = var.project
+  service            = each.value
   disable_on_destroy = false
 }
 
@@ -34,7 +35,8 @@ resource "google_artifact_registry_repository" "apps" {
 }
 
 # One runtime identity per service per environment, so a compromised service in
-# one environment cannot act as another.
+# one environment cannot act as another. The app root derives these names by
+# convention rather than receiving them.
 resource "google_service_account" "runtime" {
   for_each = local.runtime_accounts
 
