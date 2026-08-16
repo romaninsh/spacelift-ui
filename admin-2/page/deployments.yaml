@@ -8,6 +8,7 @@ body:
     name: deployments
     observe: deployments
     params:
+      refresh_interval: 5
       columns:
         app:
           label: App
@@ -61,6 +62,10 @@ body:
           when: 'row.promotable'
           action: |
             actions.promote(row);
+        - label: "Check running version"
+          when: 'row.url.starts_with("https://")'
+          action: |
+            actions.service_version(row);
         - label: "Tail logs"
           when: 'row.url != ""'
           action: |
