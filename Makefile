@@ -43,11 +43,11 @@ up:
 down:
 	docker compose down
 
-# Mint a fresh 10-hour Spacelift JWT into admin-2/.env, which the graphql
+# Mint a fresh 10-hour Spacelift JWT into vantage-admin/.env, which the graphql
 # datasource reads as ${SPACELIFT_TOKEN}.
 spacelift-token:
 	@set -a; . .secret/spacelift.env; set +a; \
 	token=$$(spacectl profile export-token 2>/dev/null); \
 	[ -n "$$token" ] || { echo "spacectl returned no token"; exit 1; }; \
-	sed -i '' "s|^SPACELIFT_TOKEN=.*|SPACELIFT_TOKEN=$$token|" admin-2/.env; \
-	echo "admin-2/.env updated"
+	sed -i '' "s|^SPACELIFT_TOKEN=.*|SPACELIFT_TOKEN=$$token|" vantage-admin/.env; \
+	echo "vantage-admin/.env updated"
