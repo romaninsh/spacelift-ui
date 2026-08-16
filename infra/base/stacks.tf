@@ -31,10 +31,6 @@ resource "spacelift_stack" "app" {
   # Production waits for a human instead of needing a policy to say so.
   autodeploy = each.value.environment != local.production
 
-  # Only dev can be previewed, so a pull request's plan is always against the
-  # environment its merge will actually land in.
-  enable_local_preview = each.value.environment == "dev"
-
   labels = [
     "component:${each.value.component}",
     "environment:${each.value.environment}",
@@ -42,17 +38,21 @@ resource "spacelift_stack" "app" {
   ]
 }
 
-# Git events never move an app stack. CI lands a merge on dev by setting the
-# commit, everything above it moves only by promotion, and a pull request is
-# previewed from the CI job that comments the plan — so what an environment
-# runs can never change because someone pushed.
+# No push moves an app stack: CI lands a merge on dev by setting the commit,
+# and everything above it moves only by promotion. Pull requests still get a
+# plan, but only against dev — the environment the merge will land in.
 resource "spacelift_policy" "app_push" {
   name = "App stacks move by API only"
   type = "GIT_PUSH"
   body = <<-REGO
     package spacelift
 
-    ignore { true }
+    track { false }
+
+    propose {
+      input.pull_request != null
+      input.stack.labels[_] == "environment:dev"
+    }
   REGO
 }
 
