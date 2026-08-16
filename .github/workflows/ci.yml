@@ -35,7 +35,36 @@ jobs:
           done
           exit $failed
 
+  # One diff, reused by every build job, so a PR only runs the checks for what
+  # it actually touched. Same watch paths the version gate uses.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      api: ${{ steps.diff.outputs.api }}
+      frontend: ${{ steps.diff.outputs.frontend }}
+      base: ${{ steps.diff.outputs.base }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2
+      - id: diff
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          base=${BASE:-$(git rev-parse HEAD~1)}
+          for component in api frontend base; do
+            if git diff --quiet "$base"...HEAD -- $(.github/component.sh watch "$component"); then
+              echo "$component=false" >> "$GITHUB_OUTPUT"
+            else
+              echo "$component=true" >> "$GITHUB_OUTPUT"
+            fi
+          done
+
   api:
+    needs: changes
+    if: needs.changes.outputs.api == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -53,6 +82,8 @@ jobs:
       - run: cargo test
 
   frontend:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -66,6 +97,8 @@ jobs:
       - run: npm run build
 
   infra:
+    needs: changes
+    if: needs.changes.outputs.base == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
