@@ -1,0 +1,46 @@
+# yaml-language-server: $schema=./table-schema-1.json
+# Runs come from `searchRuns`, whose row is a `RunWithStack` inside a Relay
+# connection — hence `response_path` and the dotted column paths. `input` is
+# non-null, so it has to be passed even empty. This account exposes no
+# filterable predicate fields (`searchRunsSuggestions` returns none) and the
+# field takes no sort or paging arguments, so all three are declared off and
+# the binder narrows to the selected stack client-side.
+datasource: spacelift
+title: Runs
+graphql:
+  root_field: searchRuns
+  args: { input: {} }
+  response_path: edges.node
+  filter: false
+  order: false
+  paginate: false
+columns:
+  - { name: run.id, label: Run, type: string, flags: [id] }
+  - { name: stack.id, label: Stack, type: string, flags: [searchable] }
+  - { name: run.createdAt, label: Created, type: timestamp }
+  - { name: run.state, label: State, type: string }
+  - { name: run.type, label: Type, type: string }
+  - { name: run.title, label: Title, type: string, flags: [title, searchable] }
+  - { name: run.commit.message, label: Commit, type: string, flags: [searchable] }
+  - { name: run.commit.authorName, label: Author, type: string }
+  - { name: run.commit.hash, label: SHA, type: string }
+  - { name: run.branch, label: Branch, type: string }
+  - { name: run.triggeredBy, label: Triggered by, type: string }
+  - { name: run.command, label: Command, type: string }
+
+  # Delta of the apply: `resources` is the total, the rest the breakdown.
+  - { name: run.delta.resources, label: Resources, type: int }
+  - { name: run.delta.addCount, label: Added, type: int }
+  - { name: run.delta.changeCount, label: Changed, type: int }
+  - { name: run.delta.deleteCount, label: Deleted, type: int }
+  - { name: run.delta.importCount, label: Imported, type: int }
+  - { name: run.delta.moveCount, label: Moved, type: int }
+  - { name: run.delta.okCount, label: Unchanged, type: int }
+
+  - { name: run.isMostRecent, label: Latest, type: bool }
+  - { name: run.finished, label: Finished, type: bool }
+  - { name: run.expired, label: Expired, type: bool }
+  - { name: run.needsApproval, label: Needs approval, type: bool }
+  - { name: run.driftDetection, label: Drift check, type: bool }
+  - { name: run.updatedAt, label: Updated, type: timestamp }
+  - { name: run.commit.url, label: Commit URL, type: string }

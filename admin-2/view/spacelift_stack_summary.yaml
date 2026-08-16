@@ -1,0 +1,102 @@
+# View: spacelift_stack_summary — the Stacks binder's headline tab.
+#
+# Three lines, each answering one question about the selected stack:
+# what it is, what state it's in, and what it builds from. The
+# description sits in its own column so a long one can't push the
+# identity lines around.
+# yaml-language-server: $schema=./view-schema-1.json
+
+title: Summary
+table: spacelift_stacks
+
+body:
+  - kind: row
+    gap: 24
+    children:
+      - kind: column
+        grow: true
+        gap: 12
+        children:
+          # What it is — name, with the space it lives in and the VCS org.
+          - kind: label
+            text: "${record.name}"
+            secondary: "${record.space}:${record.namespace}"
+            style: heading
+            copy: "${record.id}"
+
+          # What state it's in, and how long ago that state was applied.
+          - kind: row
+            gap: 8
+            children:
+              - kind: badge
+                text: "${record.state}"
+                color:
+                  success: [FINISHED]
+                  yellow: [UNCONFIRMED, CONFIRMED, INITIALIZING, PLANNING, PREPARING, PREPARING_APPLY, PREPARING_REPLAN, REPLAN_REQUESTED, APPLYING]
+                  red: [FAILED, STOPPED, DESTROYING]
+                  muted: [NONE, DISCARDED, READY]
+              - kind: label
+                when: "record.lastApplyAt != ()"
+                text: "applied ${date_relative(record.lastApplyAt)}"
+                style: muted
+              - kind: label
+                when: "record.lastApplyAt == ()"
+                text: "never applied"
+                style: muted
+              # A stack waiting on a human is the one case where the summary
+              # is not enough — you have to read the plan to answer it.
+              - kind: button
+                when: 'record.state == "UNCONFIRMED"'
+                text: Confirm
+                url: 'https://romaninsh.app.spacelift.io/stack/${record.id}/run/${record["blocker.id"]}'
+
+          # What it builds from — repo:branch/root, and whether a tracked
+          # push lands by itself or waits for a confirm.
+          - kind: row
+            gap: 8
+            children:
+              - kind: label
+                text: '${record.repository}:${record.branch}${if record.projectRoot == () || record.projectRoot == "" { "" } else { "/" + record.projectRoot }}'
+                style: mono
+                copy: '${record.repository}:${record.branch}${if record.projectRoot == () || record.projectRoot == "" { "" } else { "/" + record.projectRoot }}'
+              - kind: badge
+                text: '${if record.autodeploy { "autodeploy" } else { "manual deploy" }}'
+                color:
+                  green: [autodeploy]
+                  muted: [manual deploy]
+
+      - kind: column
+        grow: true
+        gap: 8
+        children:
+          - kind: button
+            text: Open in Spacelift
+            url: "https://romaninsh.app.spacelift.io/stack/${record.id}"
+
+          - kind: separator
+            label: Description
+          - kind: label
+            when: 'record.description != () && record.description != ""'
+            text: "${record.description}"
+          - kind: label
+            when: 'record.description == () || record.description == ""'
+            text: "No description set on this stack."
+            style: muted
+
+          # `outputs` is the has_many declared on table/spacelift_stacks.yaml,
+          # so the list resolves against the selected stack.
+          - kind: separator
+            label: Outputs
+          - kind: list
+            ref: outputs
+            empty: "This stack exposes no outputs."
+            item:
+              - kind: row
+                gap: 8
+                children:
+                  - kind: label
+                    text: "${row.name}"
+                  - kind: label
+                    text: "${row.value}"
+                    style: mono
+                    copy: "${row.value}"

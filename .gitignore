@@ -3,3 +3,4 @@ target/
 .agents/
 .secret/
 .terraform/
+.env

@@ -1,0 +1,108 @@
+# yaml-language-server: $schema=./page-schema-1.json
+# Column order answers, left to right: what is it, is it healthy, when did it
+# last change, how does it deploy, what does it build from. Everything past
+# `Project root` is detail, and everything past `Deletion protected` is still
+# under review.
+title: Spacelift stacks
+body:
+  - kind: binder
+    name: spacelift_stacks
+    observe: spacelift_stacks
+    params:
+      # Stack state changes while you watch it — a promotion moves through
+      # PREPARING, APPLYING, FINISHED without anything happening in the UI.
+      refresh_interval: 5
+      views:
+        - spacelift_stack_summary
+      # Nothing here is writable — the Summary tab is the record view.
+      details: false
+      columns:
+        name:
+          label: Name
+          # Wide enough to host the label tags alongside the stack name.
+          width: 340
+        state:
+          label: State
+          width: 120
+          color:
+            success: [FINISHED]
+            yellow:
+              [
+                UNCONFIRMED,
+                CONFIRMED,
+                INITIALIZING,
+                PLANNING,
+                PREPARING,
+                PREPARING_APPLY,
+                PREPARING_REPLAN,
+                REPLAN_REQUESTED,
+                APPLYING,
+              ]
+            red: [FAILED, STOPPED, DESTROYING]
+            muted: [NONE, DISCARDED, READY]
+        lastApplyAt:
+          label: Last apply
+          width: 120
+          # `date_relative` is the cell-Rhai helper for epoch seconds — "4 hours
+          # ago" reads better than a wall clock for a column you scan.
+          render: 'if type_of(row.lastApplyAt) == "()" { "never" } else { date_relative(row.lastApplyAt) }'
+        isDrifted:
+          label: Drifted
+          width: 90
+        autodeploy:
+          label: Auto
+          width: 70
+
+        # Hosted on `namespace` because a page column has to name a real
+        # table column; the cell composes the other three from the row.
+        namespace:
+          label: Source
+          width: 300
+          # namespace/repository@branch/project-root as one line — four
+          # columns that are only ever read together.
+          render: |
+            let out = `${row.namespace}/${row.repository}@${row.branch}`;
+            if row.projectRoot != () && row.projectRoot != "" { out += ` ${row.projectRoot}` }
+            out
+
+        autoretry: { label: Autoretry, width: 90 }
+        needsApproval: { label: Needs approval, width: 120 }
+        githubActionDeploy: { label: GH action deploy, width: 130 }
+        localPreviewEnabled: { label: Local previews, width: 120 }
+        managesStateFile: { label: Manages state, width: 120 }
+        protectFromDeletion: { label: Deletion protected, width: 130 }
+        blocked: { label: Blocked, width: 90 }
+        isDisabled: { label: Disabled, width: 90 }
+
+        # Still under review.
+        # Hoisted into the Name cell by its `label` flag; declared here only
+        # to carry the colour map each tag resolves against.
+        labels:
+          label: Labels
+          # One colour per label family, matched by prefix — a new component,
+          # environment or team is coloured without touching this.
+          color:
+            cyan: ["component:*"]
+            green: ["environment:*"]
+            yellow: ["team:*"]
+        description: { label: Description, width: 220 }
+        additionalProjectGlobs: { label: Extra globs, width: 140 }
+        driftDetectedBy: { label: Drift detected by, width: 200 }
+        isStateRollback: { label: State rollback, width: 110 }
+        stateIsTerminal: { label: State terminal, width: 110 }
+        deleted: { label: Deleted, width: 90 }
+        deleting: { label: Deleting, width: 90 }
+        entityCount: { label: Entities, width: 80 }
+        notificationCount: { label: Notifications, width: 100 }
+        lockedAt: { label: Locked at, width: 150 }
+        lockedBy: { label: Locked by, width: 140 }
+        lockNote: { label: Lock note, width: 160 }
+        isLockedByTemplateDeployment: { label: Locked by template, width: 140 }
+        canRead: { label: Can read, width: 90 }
+        canWrite: { label: Can write, width: 90 }
+        starred: { label: Starred, width: 80 }
+        createdAt: { label: Created at, width: 150 }
+        stateSetAt: { label: State set at, width: 150 }
+        stateSetBy: { label: State set by, width: 200 }
+        id: { label: ID, width: 140 }
+      default_sort: { column: name, direction: asc }
