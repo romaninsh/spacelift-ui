@@ -110,3 +110,19 @@ jobs:
             tofu -chdir="$root" init -backend=false -input=false
             tofu -chdir="$root" validate
           done
+
+  # The single check branch protection should require. Jobs above skip freely
+  # when a PR does not touch them; a skip is not a pass, but a failure here is
+  # a failure, so requiring this one cannot be satisfied by a job never running.
+  conclude:
+    needs: [version-bump, changes, api, frontend, infra]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "$RESULTS"
+          case " $RESULTS " in
+            *" failure "* | *" cancelled "*) exit 1 ;;
+          esac
