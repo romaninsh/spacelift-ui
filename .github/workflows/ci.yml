@@ -35,6 +35,48 @@ jobs:
           done
           exit $failed
 
+  # Terraform is only ever previewed against dev, the environment the merge
+  # will land in. The plan runs in Spacelift — it owns the state — and tfcmt
+  # patches one comment per stack instead of adding another on every push.
+  plan:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2
+
+      - name: Does this PR touch terraform
+        id: touched
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if git diff --quiet "$BASE"...HEAD -- $(.github/component.sh watch base); then
+            echo "infra=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "infra=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Plan against dev
+        if: steps.touched.outputs.infra == 'true'
+        env:
+          SPACELIFT_API_KEY_ENDPOINT: ${{ secrets.SPACELIFT_API_KEY_ENDPOINT }}
+          SPACELIFT_API_KEY_ID: ${{ secrets.SPACELIFT_API_KEY_ID }}
+          SPACELIFT_API_KEY_SECRET: ${{ secrets.SPACELIFT_API_KEY_SECRET }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Both services share infra/app but differ by TF_VAR_component, so
+          # each gets its own plan and its own comment to patch.
+          for component in api frontend; do
+            tfcmt --var "target:$component-dev" plan --patch -- \
+              spacectl stack local-preview --id "$component-dev"
+          done
+
   api:
     runs-on: ubuntu-latest
     defaults:

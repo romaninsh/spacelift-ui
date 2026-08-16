@@ -2,4 +2,5 @@
 node = "24"
 opentofu = "1"
 spacectl = "1"
+"aqua:suzuki-shunsuke/tfcmt" = "4"
 yq = "4"
