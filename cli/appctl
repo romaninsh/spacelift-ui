@@ -71,6 +71,9 @@ def inventory(root):
 # --- Spacelift ---------------------------------------------------------------
 
 DEPLOY_VARIABLE = "TF_VAR_deploy"
+# The name of the tag a stack is pinned to. The commit alone would do, but only
+# this makes "uat runs base-0.1.0" answerable without a git checkout.
+BASE_VARIABLE = "BASE_VERSION"
 
 
 def load_credentials(root):
@@ -102,29 +105,75 @@ def stack_id(app, env):
     return f"{app}-{env}"
 
 
-def deployments(app, envs):
-    """What each environment is pinned to, held as a stack variable rather than
-    in the repository. One query per environment, run concurrently."""
+def stack_states(app, envs):
+    """The two things an environment runs, plus whether it managed to. The
+    artifact is a stack variable and the terraform is the commit the stack is
+    pinned to; neither lives in the repository. One query per environment."""
     def read(env):
-        stack = graphql('{ stack(id:"%s") { config { id value } } }' % stack_id(app, env))["stack"]
+        stack = graphql(
+            '{ stack(id:"%s") { state trackedCommit { hash } config { id value } } }'
+            % stack_id(app, env)
+        )["stack"]
         if stack is None:
             return env, None
-        for item in stack["config"]:
-            if item["id"] == DEPLOY_VARIABLE and item["value"]:
-                return env, json.loads(item["value"])
-        return env, None
+        config = {item["id"]: item["value"] for item in stack["config"]}
+        document = config.get(DEPLOY_VARIABLE)
+        return env, {
+            "deploy": json.loads(document) if document else None,
+            "sha": (stack["trackedCommit"] or {}).get("hash"),
+            "base": config.get(BASE_VARIABLE),
+            "state": stack["state"],
+        }
 
     with ThreadPoolExecutor(max_workers=8) as pool:
         return {env: found for env, found in pool.map(read, envs) if found}
 
 
-def set_deployment(app, env, document):
+def deployments(app, envs):
+    states = stack_states(app, envs)
+    return {env: state["deploy"] for env, state in states.items() if state["deploy"]}
+
+
+def setvar(stack, name, value):
+    run(["spacectl", "stack", "environment", "setvar", "--id", stack, name, value])
+
+
+def apply(app, env, document, pin=None):
+    """Write what this environment should run, then run it. A pin carries the
+    terraform; without one only the artifact moves."""
     stack = stack_id(app, env)
-    run([
-        "spacectl", "stack", "environment", "setvar",
-        "--id", stack, DEPLOY_VARIABLE, json.dumps(document, sort_keys=True),
-    ])
+    if pin and pin["sha"]:
+        run(["spacectl", "stack", "set-current-commit", "--id", stack, "--sha", pin["sha"]])
+        if pin["base"]:
+            setvar(stack, BASE_VARIABLE, pin["base"])
+    setvar(stack, DEPLOY_VARIABLE, json.dumps(document, sort_keys=True))
     run(["spacectl", "stack", "deploy", "--id", stack])
+
+
+STACK_OUTPUTS = """{ stacks { id outputs { id value sensitive description } } }"""
+
+
+def stack_children(query, collection, only_stack):
+    """Every stack's `collection` in one round trip. Spacelift exposes none of
+    these as a root query — they only exist inside a stack — so the whole set
+    comes back at once and the caller narrows it."""
+    for stack in graphql(query)["stacks"]:
+        if only_stack and stack["id"] != only_stack:
+            continue
+        for item in stack[collection] or []:
+            yield stack["id"], item
+
+
+def decode_output(value):
+    """Outputs arrive JSON-encoded (a URL comes over as `"\\"https://…\\""`).
+    Hand back the string a human would read; anything structured stays JSON."""
+    if value is None:
+        return None
+    try:
+        decoded = json.loads(value)
+    except json.JSONDecodeError:
+        return value
+    return decoded if isinstance(decoded, str) else json.dumps(decoded, separators=(",", ":"))
 
 
 def find(items, key, what):
@@ -206,12 +255,13 @@ def deployment_rows(root, inv, only_app=None, only_env=None):
     wanted = [c for c in services(inv) if only_app in (None, c["key"])]
     envs = [e for e in inv["environments"] if only_env in (None, e["key"])]
     env_keys = [e["key"] for e in inv["environments"]]
-    desired = {c["key"]: deployments(c["key"], env_keys) for c in wanted}
+    states = {c["key"]: stack_states(c["key"], env_keys) for c in wanted}
 
     def build(pair):
         spec, env = pair
         app, key = spec["key"], env["key"]
-        want = desired[app].get(key) or {}
+        state = states[app].get(key) or {}
+        want = state.get("deploy") or {}
         live = describe(inv, app, key)
         healthy, body = (False, None)
         if live and live["ready"]:
@@ -230,11 +280,17 @@ def deployment_rows(root, inv, only_app=None, only_env=None):
 
         return {
             "id": f"{app}/{key}",
+            # Grids sort on one column, so promotion order has to be encoded
+            # rather than expressed as (app, order).
+            "sort_key": f"{app}/{env['order']:02d}",
             "app": app,
             "env": key,
             "order": env["order"],
             "version": want.get("version"),
             "digest": want.get("digest"),
+            "base": state.get("base"),
+            "sha": state.get("sha"),
+            "stack_state": state.get("state"),
             "running_digest": live["digest"] if live else None,
             "running_version": (body or {}).get("version"),
             "color": (body or {}).get("color"),
@@ -266,10 +322,14 @@ def deployment_rows(root, inv, only_app=None, only_env=None):
                 else "behind"
             )
             target = by_env.get(row["next_env"])
+            # Healthy proves the artifact runs; FINISHED proves the terraform
+            # under it applied, which a health probe cannot see when only the
+            # pin moved.
             row["promotable"] = (
                 row["status"] == "healthy"
+                and row["stack_state"] == "FINISHED"
                 and target is not None
-                and target["digest"] != row["digest"]
+                and (target["digest"], target["base"]) != (row["digest"], row["base"])
             )
 
     rows.sort(key=lambda r: (r["app"], r["order"]))
@@ -283,8 +343,11 @@ def cmd_apps(args, root, inv):
     # Columns the table doesn't declare are ignored, so pass the component
     # through and only flatten the one field that isn't a scalar.
     return [
-        {**c, "image": c.get("image"),
-         "features": ", ".join(f["variable"] for f in c.get("features") or [])}
+        {
+            **c,
+            "image": c.get("image"),
+            "features": ", ".join(f["variable"] for f in c.get("features") or []),
+        }
         for c in inv["components"]
     ]
 
@@ -295,6 +358,21 @@ def cmd_envs(args, root, inv):
 
 def cmd_deployments(args, root, inv):
     return deployment_rows(root, inv, args.app, args.env)
+
+
+def cmd_outputs(args, root, inv):
+    rows = []
+    for stack, item in stack_children(STACK_OUTPUTS, "outputs", args.stack):
+        rows.append({
+            # Output names are unique within a stack, not across them.
+            "id": f"{stack}/{item['id']}",
+            "stack": stack,
+            "name": item["id"],
+            "value": decode_output(item["value"]),
+            "sensitive": item["sensitive"],
+            "description": item["description"],
+        })
+    return rows
 
 
 def cmd_prs(args, root, inv):
@@ -344,26 +422,35 @@ def cmd_promote(args, root, inv):
     if not from_row["version"]:
         raise Failure(f"{args.app} has nothing deployed in {args.source}")
 
+    if from_row["stack_state"] != "FINISHED" and not args.force:
+        raise Failure(
+            f"{args.app} in {args.source} last ran '{from_row['stack_state']}', not FINISHED — "
+            f"refusing to promote terraform that did not apply. Use --force to override."
+        )
+
     if from_row["status"] != "healthy" and not args.force:
         raise Failure(
             f"{args.app} in {args.source} is '{from_row['status']}', not healthy — "
             f"refusing to promote it. Use --force to override."
         )
 
-    if to_row["digest"] == from_row["digest"]:
+    if (to_row["digest"], to_row["base"]) == (from_row["digest"], from_row["base"]):
         return {
             "promoted": False,
-            "reason": f"{args.target} already runs {from_row['version']}",
+            "reason": f"{args.target} already runs {from_row['version']} on {from_row['base']}",
         }
 
-    # The artifact moves; the target keeps its own feature flags, which are
-    # environment configuration rather than part of what was built.
+    # The pair moves together, so the target can only ever run a combination of
+    # terraform and artifact the source actually ran. The target keeps its own
+    # feature flags, which are environment configuration rather than part of
+    # what was built.
     current = deployments(args.app, [args.target])
     document = {
         **current.get(args.target, {}),
         "version": from_row["version"],
         "digest": from_row["digest"],
     }
+    pin = {"sha": from_row["sha"], "base": from_row["base"]}
 
     result = {
         "promoted": not args.dry_run,
@@ -372,14 +459,16 @@ def cmd_promote(args, root, inv):
         "to": args.target,
         "version": from_row["version"],
         "digest": from_row["digest"],
+        "base": from_row["base"],
         "replaced": to_row["version"],
+        "replaced_base": to_row["base"],
         "stack": stack_id(args.app, args.target),
     }
     if args.dry_run:
         result["document"] = document
         return result
 
-    set_deployment(args.app, args.target, document)
+    apply(args.app, args.target, document, pin)
     return result
 
 
@@ -441,7 +530,7 @@ def cmd_feature_set(args, root, inv):
         "applied": not args.dry_run,
     }
     if not args.dry_run:
-        set_deployment(args.app, args.env, document)
+        apply(args.app, args.env, document)
     return result
 
 
@@ -454,6 +543,7 @@ def main():
         ("envs", cmd_envs, []),
         ("deployments", cmd_deployments, ["--app", "--env"]),
         ("prs", cmd_prs, ["--app"]),
+        ("outputs", cmd_outputs, ["--stack"]),
         ("features", cmd_features, ["--app", "--env"]),
     ]:
         listing = (

@@ -1,6 +1,9 @@
 name: release
 
-# Landing a version change on main builds that component and tags the commit.
+# Landing a version change on main releases that component and moves dev onto
+# it. Two independent axes: a service release changes which image dev runs, an
+# infra release changes which commit dev's stacks are pinned to. Neither
+# touches the other, and neither touches any environment above dev.
 on:
   push:
     branches: [main]
@@ -10,7 +13,7 @@ on:
         description: Component to release
         required: true
         type: choice
-        options: [api, frontend]
+        options: [api, frontend, base]
 
 permissions:
   contents: write
@@ -31,6 +34,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       releases: ${{ steps.changed.outputs.releases }}
+      infra: ${{ steps.changed.outputs.infra }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -45,39 +49,70 @@ jobs:
         run: |
           set -euo pipefail
 
-          api_version() { sed -n 's/^version = "\(.*\)"/\1/p' | head -1; }
-          frontend_version() { node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version"; }
-
-          manifest() {
-            case "$1" in
-              api)      echo "api/Cargo.toml api_version" ;;
-              frontend) echo "frontend/package.json frontend_version" ;;
-            esac
-          }
-
           before="$BEFORE"
           if [ -z "$before" ] || ! git cat-file -e "$before" 2>/dev/null; then
             before=$(git rev-parse HEAD~1)
           fi
 
+          # Prints the version only if it moved — or always, when forced.
+          bumped() {
+            now=$(.github/component.sh version "$1")
+            if [ -n "${FORCED:-}" ]; then echo "$now"; return; fi
+            was=$(.github/component.sh version "$1" "$before" || true)
+            [ "$now" = "$was" ] || echo "$now"
+          }
+
           releases='[]'
-          for component in ${FORCED:-api frontend}; do
-            read -r path extract <<<"$(manifest "$component")"
-            now=$("$extract" < "$path")
+          infra=''
+          for component in ${FORCED:-api frontend base}; do
+            version=$(bumped "$component")
+            [ -n "$version" ] || continue
+            echo "$component: $version"
 
-            if [ -n "$FORCED" ]; then
-              echo "$component: forced release of $now"
+            if [ "$component" = base ]; then
+              infra="$version"
             else
-              was=$(git show "$before:$path" 2>/dev/null | "$extract" || true)
-              [ "$now" = "$was" ] && continue
-              echo "$component: $was -> $now"
+              releases=$(jq -c --arg c "$component" --arg v "$version" \
+                '. + [{component:$c,version:$v}]' <<<"$releases")
             fi
-
-            releases=$(echo "$releases" | jq -c --arg c "$component" --arg v "$now" '. + [{component:$c,version:$v}]')
           done
 
           echo "releases=$releases" >> "$GITHUB_OUTPUT"
-          echo "$releases"
+          echo "infra=$infra" >> "$GITHUB_OUTPUT"
+
+  # Independent of the service releases: the two axes reach dev separately and
+  # may briefly disagree there. Only promotion moves them as a pair, which is
+  # what every environment above dev sees.
+  infra:
+    needs: detect
+    if: needs.detect.outputs.infra != ''
+    runs-on: ubuntu-latest
+    env:
+      TAG: base-${{ needs.detect.outputs.infra }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2
+
+      - name: Tag the released commit
+        run: .github/tag.sh "$TAG" "$GITHUB_SHA"
+
+      # Only after the tag exists, so dev is never pinned to a commit nobody
+      # can name. BASE_VERSION carries that name, which is what promotion and
+      # the dashboard read back.
+      - name: Pin dev to it
+        env:
+          SPACELIFT_API_KEY_ENDPOINT: ${{ secrets.SPACELIFT_API_KEY_ENDPOINT }}
+          SPACELIFT_API_KEY_ID: ${{ secrets.SPACELIFT_API_KEY_ID }}
+          SPACELIFT_API_KEY_SECRET: ${{ secrets.SPACELIFT_API_KEY_SECRET }}
+        run: |
+          set -euo pipefail
+          for component in api frontend; do
+            spacectl stack set-current-commit --id "$component-dev" --sha "$GITHUB_SHA"
+            spacectl stack environment setvar --id "$component-dev" BASE_VERSION "$TAG"
+            spacectl stack deploy --id "$component-dev"
+          done
 
   release:
     needs: detect
@@ -89,6 +124,7 @@ jobs:
         include: ${{ fromJson(needs.detect.outputs.releases) }}
     env:
       IMAGE: europe-west2-docker.pkg.dev/inlaid-agility-461020-e4/${{ matrix.component }}/${{ matrix.component }}
+      TAG: ${{ matrix.component }}-${{ matrix.version }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -117,7 +153,7 @@ jobs:
           push: true
           provenance: false
           build-args: |
-            APP_VERSION=${{ matrix.component }}-${{ matrix.version }}
+            APP_VERSION=${{ env.TAG }}
           tags: |
             ${{ env.IMAGE }}:${{ matrix.version }}
             ${{ env.IMAGE }}:sha-${{ github.sha }}
@@ -126,18 +162,7 @@ jobs:
 
       # Only once the artifact is really in the registry.
       - name: Tag the released commit
-        env:
-          TAG: ${{ matrix.component }}-${{ matrix.version }}
-        run: |
-          set -euo pipefail
-          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
-            echo "$TAG already exists"
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "$TAG" -m "$TAG" "${{ github.sha }}"
-          git push origin "$TAG"
+        run: .github/tag.sh "$TAG" "$GITHUB_SHA"
 
       # Dev has its own stack, so CI cannot reach any other environment even by
       # accident. Promotion above dev is a human action.
@@ -147,18 +172,22 @@ jobs:
           SPACELIFT_API_KEY_ID: ${{ secrets.SPACELIFT_API_KEY_ID }}
           SPACELIFT_API_KEY_SECRET: ${{ secrets.SPACELIFT_API_KEY_SECRET }}
           COMPONENT: ${{ matrix.component }}
-          TAG: ${{ matrix.component }}-${{ matrix.version }}
           DIGEST: ${{ steps.build.outputs.digest }}
         run: |
           set -euo pipefail
           test -n "$DIGEST"
-          document=$(jq -cn --arg v "$TAG" --arg d "$DIGEST" '{version:$v,digest:$d}')
+
+          # The artifact moves; dev's feature flags are environment
+          # configuration and survive the release that lands beside them.
+          kept=$(spacectl api "{ stack(id:\"$COMPONENT-dev\") { config { id value } } }" |
+            jq -r '.data.stack.config[]? | select(.id == "TF_VAR_deploy") | .value')
+          document=$(jq -cn --argjson kept "${kept:-null}" --arg v "$TAG" --arg d "$DIGEST" \
+            '{version: $v, digest: $d, features: ($kept.features // {})}')
           spacectl stack environment setvar --id "$COMPONENT-dev" TF_VAR_deploy "$document"
           spacectl stack deploy --id "$COMPONENT-dev"
 
       - name: Summary
         env:
-          TAG: ${{ matrix.component }}-${{ matrix.version }}
           DIGEST: ${{ steps.build.outputs.digest }}
         run: |
           {
