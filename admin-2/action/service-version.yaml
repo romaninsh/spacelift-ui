@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=./action-schema-1.json
+# Asks the running service what version it is, rather than trusting what the
+# deploy document says it should be. One grep serves both components: the api
+# answers /version with JSON, the frontend serves its index — so the pattern
+# matches a bare semver wherever it appears rather than a per-app shape.
+kind: terminal
+description: |
+  Fetches ${row.url}${row.health} and prints the version it reports.
+dialog:
+  title: "Running version — ${row.app} in ${row.env}"
+  confirm_label: Check
+terminal:
+  command: /bin/sh
+  args:
+    - -c
+    # The URL arrives as $0, never spliced into the script, so a value that
+    # looks like a flag or a shell metacharacter stays one argument.
+    - 'curl -fsSL -- "$0" | grep -oE "[0-9]+\.[0-9]+\.[0-9]+" | head -1'
+    - "${row.url}${row.health}"

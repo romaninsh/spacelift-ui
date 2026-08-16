@@ -215,19 +215,30 @@ def describe(inv, app, env):
         return None
 
     served = json.loads(result.stdout)
-    conditions = served.get("status", {}).get("conditions", [])
-    ready = any(c.get("type") == "Ready" and c.get("status") == "True" for c in conditions)
+    status = served.get("status", {})
+    conditions = status.get("conditions", [])
+    ready_status = next(
+        (c.get("status") for c in conditions if c.get("type") == "Ready"), None
+    )
+    ready = ready_status == "True"
     containers = (
         served.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [])
     )
     image = containers[0].get("image", "") if containers else ""
 
     return {
-        "url": served.get("status", {}).get("url"),
+        "url": status.get("url"),
         "ready": ready,
+        "ready_status": ready_status,
         "image": image,
+        # From `spec.template`, so this is what the service was last *asked*
+        # to run — it changes the instant a deploy is requested, not when the
+        # new revision starts serving.
         "digest": image.split("@", 1)[1] if "@" in image else None,
-        "revision": served.get("status", {}).get("latestReadyRevisionName"),
+        "revision": status.get("latestReadyRevisionName"),
+        # A revision created but not yet ready is a rollout in progress.
+        "rolling_out": status.get("latestCreatedRevisionName")
+        != status.get("latestReadyRevisionName"),
     }
 
 
@@ -272,6 +283,13 @@ def deployment_rows(root, inv, only_app=None, only_env=None):
         elif not live:
             status = "not deployed"
         elif live["digest"] != want.get("digest"):
+            # Cloud Run has not been asked for this digest yet.
+            status = "deploying"
+        elif live["rolling_out"] and live["ready_status"] != "False":
+            # Asked for, revision created, not yet serving. Traffic is still
+            # on the old revision, so a probe here answers with the previous
+            # version — healthy, but not the thing being deployed. Ready
+            # going False means the new revision failed rather than lagged.
             status = "deploying"
         elif healthy:
             status = "healthy"
@@ -295,6 +313,8 @@ def deployment_rows(root, inv, only_app=None, only_env=None):
             "running_version": (body or {}).get("version"),
             "color": (body or {}).get("color"),
             "url": live["url"] if live else None,
+            # Where the service answers that it is alive — what "open" should show.
+            "health": spec.get("health"),
             "revision": live["revision"] if live else None,
             "ready": bool(live and live["ready"]),
             "healthy": healthy,

@@ -38,6 +38,10 @@ body:
       script: |
         scenery("deployments").where("app", "${apps.selected_id}").sort("order", "asc")
     params:
+      # A deployment is mid-flight for a minute or two — status and version
+      # both move. Each row costs a Cloud Run describe plus a health probe,
+      # so this is the slowest refresh in the app on purpose.
+      refresh_interval: 5
       columns:
         order:
           label: "#"
@@ -87,6 +91,10 @@ body:
           when: 'row.promotable'
           action: |
             actions.promote(row);
+        - label: "Check running version"
+          when: 'row.url.starts_with("https://")'
+          action: |
+            actions.service_version(row);
         - label: "Tail logs"
           when: 'row.url != ""'
           action: |
