@@ -20,22 +20,14 @@ jobs:
           BASE: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
-          api_version() { sed -n 's/^version = "\(.*\)"/\1/p' | head -1; }
-          frontend_version() { node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version"; }
-
           failed=0
-          for component in api frontend; do
-            case "$component" in
-              api)      path=api/Cargo.toml;        extract=api_version ;;
-              frontend) path=frontend/package.json; extract=frontend_version ;;
-            esac
+          for component in api frontend base; do
+            git diff --quiet "$BASE"...HEAD -- $(.github/component.sh watch "$component") && continue
 
-            git diff --quiet "$BASE"...HEAD -- "$component" && continue
-
-            now=$("$extract" < "$path")
-            was=$(git show "$BASE:$path" | "$extract")
+            now=$(.github/component.sh version "$component")
+            was=$(.github/component.sh version "$component" "$BASE" || true)
             if [ "$now" = "$was" ]; then
-              echo "::error file=$path::$component changed but still declares $now — bump it or the merge ships nothing"
+              echo "::error::$component changed but still declares $now — bump it or the merge ships nothing"
               failed=1
             else
               echo "$component: $was -> $now"

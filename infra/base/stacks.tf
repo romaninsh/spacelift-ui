@@ -38,6 +38,31 @@ resource "spacelift_stack" "app" {
   ]
 }
 
+# No push moves an app stack: CI lands a merge on dev by setting the commit,
+# and everything above it moves only by promotion. Pull requests still get a
+# plan, but only against dev — the environment the merge will land in.
+resource "spacelift_policy" "app_push" {
+  name = "App stacks move by API only"
+  type = "GIT_PUSH"
+  body = <<-REGO
+    package spacelift
+
+    track { false }
+
+    propose {
+      input.pull_request != null
+      input.stack.labels[_] == "environment:dev"
+    }
+  REGO
+}
+
+resource "spacelift_policy_attachment" "app_push" {
+  for_each = spacelift_stack.app
+
+  policy_id = spacelift_policy.app_push.id
+  stack_id  = each.value.id
+}
+
 resource "spacelift_environment_variable" "component" {
   for_each = local.app_stacks
 
