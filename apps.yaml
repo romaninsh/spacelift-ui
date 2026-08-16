@@ -10,14 +10,16 @@ components:
   - key: base
     title: Base
     kind: infra
+    team: plat
     path: infra/base
     stack: base
     tag_prefix: base-
   - key: api
     title: API
     kind: service
+    team: back
     path: api
-    stack: api
+    stack: app
     tag_prefix: api-
     image: api/api
     service: api-{env}
@@ -31,8 +33,9 @@ components:
   - key: frontend
     title: Frontend
     kind: service
+    team: front
     path: frontend
-    stack: frontend
+    stack: app
     tag_prefix: frontend-
     image: frontend/frontend
     service: frontend-{env}

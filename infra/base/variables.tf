@@ -18,6 +18,11 @@ variable "services" {
   type        = list(string)
 }
 
+variable "teams" {
+  description = "Owning team per component key, including base. Becomes a team: label on each stack."
+  type        = map(string)
+}
+
 variable "ci_api_key_id" {
   description = "Spacelift API key GitHub Actions uses. Created by hand; empty leaves CI unbound."
   type        = string

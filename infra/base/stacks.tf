@@ -34,6 +34,7 @@ resource "spacelift_stack" "app" {
   labels = [
     "component:${each.value.component}",
     "environment:${each.value.environment}",
+    "team:${var.teams[each.value.component]}",
   ]
 }
 
