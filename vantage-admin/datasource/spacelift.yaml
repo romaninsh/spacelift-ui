@@ -1,7 +1,7 @@
 # yaml-language-server: $schema=./datasource-schema-1.json
 # Spacelift's own GraphQL API — read directly, no appctl in between.
 # The token is a 10-hour JWT minted from the API key; ${SPACELIFT_TOKEN}
-# resolves from admin-2/.env, which is never exported to child processes.
+# resolves from vantage-admin/.env, which is never exported to child processes.
 type: graphql
 description: "Spacelift GraphQL API"
 url: https://romaninsh.app.spacelift.io/graphql
