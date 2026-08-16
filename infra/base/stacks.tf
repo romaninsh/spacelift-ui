@@ -137,10 +137,9 @@ resource "google_artifact_registry_repository_iam_member" "stack_reader" {
   member     = "serviceAccount:${spacelift_stack_gcp_service_account.app[each.key].service_account_email}"
 }
 
-resource "spacelift_drift_detection" "app" {
-  for_each = local.app_stacks
-
-  stack_id  = spacelift_stack.app[each.key].id
-  reconcile = false
-  schedule  = ["0 6 * * *"]
-}
+# No drift detection here. Scheduled drift detection needs a private worker
+# pool; on the default pool Spacelift accepts the resource but never runs it —
+# zero DRIFT_DETECTION runs in the first four days — and its presence then
+# rejects every stack update with "can't switch to default workerpool",
+# blocking tofu from changing these stacks at all. Bring it back with a
+# worker pool, not on its own.
