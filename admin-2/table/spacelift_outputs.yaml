@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=./table-schema-1.json
+# Stack outputs. Terraform hands these over JSON-encoded; appctl decodes the
+# scalars so `value` reads as the URL or version it actually is.
+datasource: appctl
+title: Outputs
+columns:
+  - { name: id, type: string, flags: [id] }
+  - { name: stack, type: string, flags: [searchable] }
+  - { name: name, type: string, flags: [title, searchable] }
+  - { name: value, type: string, flags: [searchable] }
+  - { name: description, type: string }
+  - { name: sensitive, type: bool }
+cmd:
+  rhai: |
+    let out = run(["outputs", "list"]);
+    if out.exit_code != 0 { throw out.stderr; }
+    parse_json(out.stdout)

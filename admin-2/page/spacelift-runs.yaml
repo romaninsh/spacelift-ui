@@ -1,0 +1,40 @@
+# yaml-language-server: $schema=./page-schema-1.json
+# Every run across every stack. Also what a drill-down from a stack opens —
+# `link_opener` resolves a link target to the first page bound to that table
+# and mounts it over the narrowed entity, so without this page a traversal
+# click is logged and dropped.
+title: Runs
+body:
+  - kind: grid
+    name: spacelift_runs
+    observe: spacelift_runs
+    params:
+      # A run in flight changes state every few seconds.
+      refresh_interval: 5
+      columns:
+        run.createdAt: { width: 150 }
+        stack.id: { width: 120 }
+        run.state:
+          width: 120
+          color:
+            success: [FINISHED]
+            yellow: [UNCONFIRMED, CONFIRMED, INITIALIZING, PLANNING, PREPARING, PREPARING_APPLY, PREPARING_REPLAN, REPLAN_REQUESTED, APPLYING]
+            red: [FAILED, STOPPED, DESTROYING]
+            muted: [NONE, DISCARDED, READY]
+        run.type: { width: 100 }
+        run.title: { width: 260 }
+        run.commit.authorName: { width: 150 }
+        run.commit.hash: { width: 90 }
+        run.branch: { width: 90 }
+        run.triggeredBy: { width: 180 }
+        run.delta.resources: { width: 90 }
+        run.delta.addCount: { width: 80 }
+        run.delta.changeCount: { width: 80 }
+        run.delta.deleteCount: { width: 80 }
+        run.isMostRecent: { width: 80 }
+        run.finished: { width: 90 }
+        run.needsApproval: { width: 120 }
+        run.driftDetection: { width: 100 }
+        run.updatedAt: { width: 150 }
+        run.id: { width: 200 }
+      default_sort: { column: run.createdAt, direction: desc }

@@ -1,0 +1,27 @@
+# yaml-language-server: $schema=./table-schema-1.json
+# What each stack manages, from `searchManagedEntities` — a Relay connection
+# whose node is flat apart from vendor/creator/updater. `first: 500` because
+# the field pages at 10 by default. Filtering and sorting are declared off:
+# the binder narrows to the selected stack client-side.
+datasource: spacelift
+title: Resources
+graphql:
+  root_field: searchManagedEntities
+  args: { input: { first: 500 } }
+  response_path: edges.node
+  filter: false
+  order: false
+  paginate: false
+columns:
+  - { name: id, type: string, flags: [id] }
+  - { name: stackId, label: Stack, type: string, flags: [searchable] }
+  - { name: address, label: Address, type: string, flags: [title, searchable] }
+  - { name: type, label: Type, type: string, flags: [searchable] }
+  - { name: name, label: Name, type: string }
+  - { name: drifted, label: Drifted at, type: timestamp }
+  - { name: updatedAt, label: Updated, type: timestamp }
+  - { name: parent, label: Parent, type: string }
+  - { name: vendor.__typename, label: Vendor, type: string }
+  - { name: creator.id, label: Created by run, type: string }
+  - { name: updater.id, label: Updated by run, type: string }
+  - { name: thirdPartyMetadata, label: Metadata, type: string }

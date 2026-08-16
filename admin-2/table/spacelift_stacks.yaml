@@ -1,0 +1,94 @@
+# yaml-language-server: $schema=./table-schema-1.json
+# Every scalar field the `stacks` query exposes on the Stack type. Composite
+# fields (runs, outputs, dependsOn, config, spaceDetails, …) need their own
+# tables — the renderer only emits a flat selection set for these columns.
+datasource: spacelift
+title: Spacelift stacks
+graphql:
+  root_field: stacks
+# Each child lives inside a stack in the GraphQL schema and is fetched by
+# appctl, so these cross datasources: the binder narrows the appctl table by
+# its `stack` column against the stack's id.
+references:
+  runs:
+    table: spacelift_runs
+    kind: has_many
+    foreign_key: stack.id
+    narrow_via: id
+  resources:
+    table: spacelift_resources
+    kind: has_many
+    foreign_key: stackId
+    narrow_via: id
+  outputs:
+    table: spacelift_outputs
+    kind: has_many
+    foreign_key: stack
+    narrow_via: id
+columns:
+  - { name: id, type: string, flags: [id, searchable] }
+  - { name: name, type: string, flags: [title, searchable] }
+  - { name: description, type: string, flags: [searchable] }
+  - { name: state, type: string }
+  # The run holding the stack up. Populated exactly when something is waiting
+  # on a human, which is the run the summary's Confirm button opens. Hidden
+  # because it is a link target, not a column anyone reads.
+  - { name: blocker.id, label: Blocker, type: string, flags: [hidden] }
+  - { name: space, type: string }
+  # Rendered as tags inside the Name cell rather than its own column.
+  - { name: labels, label: Labels, type: string, flags: [label] }
+
+  - { name: namespace, type: string }
+  - { name: repository, type: string }
+  - { name: branch, type: string }
+  - { name: projectRoot, type: string }
+  - { name: apiHost, type: string }
+  - { name: repositoryURL, type: string }
+  - { name: repositoryTags, type: string }
+  - { name: additionalProjectGlobs, type: string }
+  - { name: gitSparseCheckoutPaths, type: string }
+  - { name: vcsDetached, type: bool }
+  - { name: trackedCommitSetBy, type: string }
+
+  - { name: terraformVersion, type: string }
+  - { name: effectiveTerraformVersion, type: string }
+  - { name: runnerImage, type: string }
+  - { name: wasMigratedFromTerraform, type: bool }
+  - { name: skipVendorBinaryDownload, type: bool }
+
+  - { name: autodeploy, type: bool }
+  - { name: autoretry, type: bool }
+  - { name: administrative, type: bool }
+  - { name: needsApproval, type: bool }
+  - { name: githubActionDeploy, type: bool }
+  - { name: localPreviewEnabled, type: bool }
+  - { name: managesStateFile, type: bool }
+  - { name: enableWellKnownSecretMasking, type: bool }
+  - { name: enableSensitiveOutputUpload, type: bool }
+  - { name: protectFromDeletion, type: bool }
+
+  - { name: blocked, type: bool }
+  - { name: isDisabled, type: bool }
+  - { name: isDrifted, type: bool }
+  - { name: driftDetectedBy, type: string }
+  - { name: isStateRollback, type: bool }
+  - { name: stateIsTerminal, type: bool }
+  - { name: deleted, type: bool }
+  - { name: deleting, type: bool }
+  - { name: entityCount, type: int }
+  - { name: notificationCount, type: int }
+
+  - { name: lockedAt, type: timestamp }
+  - { name: lockedBy, type: string }
+  - { name: lockNote, type: string }
+  - { name: isLockedByTemplateDeployment, type: bool }
+  - { name: canRead, type: bool }
+  - { name: canWrite, type: bool }
+  - { name: starred, type: bool }
+
+  # Epoch seconds on the wire; the timestamp column reads an integer cell
+  # directly, so no cell-Rhai formatting is needed.
+  - { name: createdAt, type: timestamp }
+  - { name: stateSetAt, type: timestamp }
+  - { name: stateSetBy, type: string }
+  - { name: lastApplyAt, type: timestamp }

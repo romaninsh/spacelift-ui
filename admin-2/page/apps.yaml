@@ -9,37 +9,39 @@ body:
     observe: apps
     params:
       columns:
-        key:
-          label: App
-          width: 130
         title:
           label: Name
-          width: 150
+          width: 200
         kind:
+          # Rendered as a tag inside the Name cell. Amber rather than blue,
+          # which the Adventure Time theme already uses for chrome.
           label: Kind
-          width: 100
           color:
-            blue: [service]
+            yellow: [service]
             muted: [infra]
         stack:
           label: Stack
-          width: 110
+          width: 160
+          render: '`${row.key} (${row.stack})`'
         image:
           label: Image
-          width: 300
+          width: 320
         features:
           label: Feature flags
-          width: 180
-      default_sort: { column: key, direction: asc }
+          width: 200
+      default_sort: { column: title, direction: asc }
 
   - kind: grid
     name: app_deployments
     when: '${apps.selected_id} != ""'
     observe:
       script: |
-        scenery("deployments").where("app", "${apps.selected_id}")
+        scenery("deployments").where("app", "${apps.selected_id}").sort("order", "asc")
     params:
       columns:
+        order:
+          label: "#"
+          width: 50
         env:
           label: Environment
           width: 120

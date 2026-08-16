@@ -1,11 +1,14 @@
 # yaml-language-server: $schema=./action-schema-1.json
 kind: terminal
 description: |
-  Copies the exact image digest running in ${row.env} into ${row.next_env}, then
-  commits and pushes. Spacelift picks the change up and deploys it.
+  Copies what ${row.env} runs into ${row.next_env}: the exact image digest and
+  the commit its terraform is pinned to, together, so the target can only ever
+  run a pair ${row.env} actually ran. Nothing is committed to git — both are
+  stack variables, and Spacelift deploys on the spot.
 
-  appctl re-checks that ${row.env} is healthy before writing anything, so this
-  refuses on its own if the source stopped being good since the menu opened.
+  appctl re-checks that ${row.env} is healthy and that its last run finished
+  before writing anything, so this refuses on its own if the source stopped
+  being good since the menu opened.
 dialog:
   title: "Promote ${row.app} ${row.version}: ${row.env} to ${row.next_env}"
   confirm_label: Promote

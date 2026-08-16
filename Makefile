@@ -2,7 +2,7 @@ API_PORT ?= 8080
 FRONTEND_PORT ?= 8081
 APP_COLOR ?= green
 
-.PHONY: install build test lint fmt clean api frontend dev up down
+.PHONY: install build test lint fmt clean api frontend dev up down spacelift-token
 
 install:
 	cd frontend && npm install
@@ -42,3 +42,12 @@ up:
 
 down:
 	docker compose down
+
+# Mint a fresh 10-hour Spacelift JWT into admin-2/.env, which the graphql
+# datasource reads as ${SPACELIFT_TOKEN}.
+spacelift-token:
+	@set -a; . .secret/spacelift.env; set +a; \
+	token=$$(spacectl profile export-token 2>/dev/null); \
+	[ -n "$$token" ] || { echo "spacectl returned no token"; exit 1; }; \
+	sed -i '' "s|^SPACELIFT_TOKEN=.*|SPACELIFT_TOKEN=$$token|" admin-2/.env; \
+	echo "admin-2/.env updated"

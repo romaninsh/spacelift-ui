@@ -54,7 +54,7 @@ body:
         url:
           label: URL
           width: 320
-      default_sort: { column: id, direction: asc }
+      default_sort: { column: sort_key, direction: asc }
       refresh_interval: 30
       row_actions:
         - label: "Promote to next environment"

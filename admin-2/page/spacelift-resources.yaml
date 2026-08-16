@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=./page-schema-1.json
+# Everything Spacelift manages, across every stack. Doubles as the drill-down
+# target for a stack's Resources relation — see page/spacelift-runs.yaml.
+title: Resources
+body:
+  - kind: grid
+    name: spacelift_resources
+    observe: spacelift_resources
+    params:
+      # An apply adds and removes resources under you.
+      refresh_interval: 5
+      columns:
+        address: { width: 320 }
+        stackId: { width: 130 }
+        type: { width: 240 }
+        name: { width: 160 }
+        drifted: { width: 150 }
+        updatedAt: { width: 150 }
+        parent: { width: 200 }
+        vendor.__typename: { width: 170 }
+        creator.id: { width: 200 }
+        updater.id: { width: 200 }
+      default_sort: { column: address, direction: asc }

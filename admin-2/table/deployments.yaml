@@ -5,6 +5,7 @@ datasource: appctl
 title: Deployments
 columns:
   - { name: id, type: string, flags: [id] }
+  - { name: sort_key, type: string }
   - { name: app, type: string, flags: [searchable] }
   - { name: env, type: string, flags: [title] }
   - { name: order, type: int }
@@ -31,3 +32,4 @@ cmd:
     let out = run(args);
     if out.exit_code != 0 { throw out.stderr; }
     parse_json(out.stdout)
+
